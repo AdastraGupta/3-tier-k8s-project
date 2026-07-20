@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: taskmanager
+  labels:
+    app: taskmanager
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: taskmanager
+      tier: backend
+  template:
+    metadata:
+      labels:
+        app: taskmanager
+        tier: backend
+    spec:
+      containers:
+        - name: postgrest
+          image: postgrest/postgrest:v12.2.3
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PGRST_DB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: PGRST_DB_URI
+            - name: PGRST_DB_SCHEMAS
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: PGRST_DB_SCHEMAS
+            - name: PGRST_DB_ANON_ROLE
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: PGRST_DB_ANON_ROLE
+            - name: PGRST_SERVER_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: PGRST_SERVER_PORT
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

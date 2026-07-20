@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-svc
+  namespace: taskmanager
+  labels:
+    app: taskmanager
+    tier: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: taskmanager
+    tier: backend
+  ports:
+    - port: 3000
+      targetPort: 3000
+      protocol: TCP
