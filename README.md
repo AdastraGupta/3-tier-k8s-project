@@ -64,52 +64,51 @@ graph TB
 
 ## Tech Stack
 
-| Component  | Image                           | Purpose                                        |
+| Component  | Image / Tool                    | Purpose                                        |
 | ---------- | ------------------------------- | ---------------------------------------------- |
 | Frontend   | `nginx:1.25-alpine`             | Serves static UI & reverse-proxies API requests |
 | Backend    | `postgrest/postgrest:v12.2.3`   | Auto-generates REST API from PostgreSQL schema  |
 | Database   | `postgres:15-alpine`            | Relational database with persistent storage     |
+| GitOps     | ArgoCD `v2.11.3`                | Watches Git and auto-syncs manifests to cluster |
 
 ---
 
 ## Prerequisites
 
-| Tool                        | Required | Notes                                    |
-| --------------------------- | -------- | ---------------------------------------- |
+| Tool                        | Required | Notes                                      |
+| --------------------------- | -------- | ------------------------------------------ |
 | Docker                      | ✅        | Container runtime (kind runs K8s in Docker) |
-| kubectl                     | ✅        | Kubernetes CLI                           |
-| kind                        | ✅        | Local Kubernetes cluster via Docker      |
+| kubectl                     | ✅        | Kubernetes CLI                             |
+| kind                        | ✅        | Local Kubernetes cluster via Docker        |
+| Internet access             | ✅        | ArgoCD is installed from GitHub releases   |
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. Create a kind cluster with port mappings for Ingress
-kind create cluster --name taskmanager --config kind-config.yaml
-
-# 2. Install the Nginx Ingress Controller for kind
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
-
-# 3. Wait for the ingress controller to be ready
-kubectl wait --namespace ingress-nginx \
-  --for=condition=ready pod \
-  --selector=app.kubernetes.io/component=controller \
-  --timeout=120s
-
-# 4. Deploy the entire stack in the correct order
+# 1. Run the automated bootstrap script
+#    This creates the Kind cluster, installs Nginx Ingress, installs ArgoCD,
+#    and bootstraps the ArgoCD Application — all in one command.
 bash deploy.sh
 
-# 5. Access the app directly (kind maps port 80 to localhost)
-#    → http://localhost
-#
-# Or use port-forward if port 80 is occupied:
-#    kubectl port-forward svc/frontend-svc 8080:80 -n taskmanager
-#    → http://localhost:8080
+# 2. Access the Task Manager app
+#    → http://localhost            (via Ingress)
+#    → http://localhost:8081       (via port-forward, if port 80 is busy)
+#       kubectl port-forward svc/frontend-svc 8081:80 -n taskmanager
+
+# 3. Access the ArgoCD dashboard
+#    kubectl port-forward svc/argocd-server 8080:443 -n argocd
+#    → https://localhost:8080   (username: admin)
+#    Password: kubectl -n argocd get secret argocd-initial-admin-secret \
+#              -o jsonpath='{.data.password}' | base64 -d
 ```
 
 > [!TIP]
-> The `deploy.sh` script handles **everything** automatically — cluster creation, ingress setup, and app deployment. Just run `bash deploy.sh` and it does it all!
+> The `deploy.sh` script handles **everything** automatically — cluster creation, Nginx Ingress, ArgoCD installation, and GitOps bootstrap. Just run `bash deploy.sh`!
+
+> [!NOTE]
+> After bootstrap, **all future deployments are GitOps**: edit any file in `k8s/`, commit, and push to `main` — ArgoCD will automatically sync the changes to the cluster within minutes.
 
 ---
 
@@ -118,9 +117,11 @@ bash deploy.sh
 ```
 k8s-task-manager/
 ├── README.md                        # This file
-├── deploy.sh                        # Automated deployment script
+├── deploy.sh                        # Automated bootstrap script (GitOps-aware)
 ├── kind-config.yaml                 # Kind cluster config with port mappings
 └── k8s/
+    ├── argocd-namespace.yaml        # ArgoCD namespace
+    ├── argocd-app.yaml              # ArgoCD Application CR (GitOps config)
     ├── namespace.yaml               # taskmanager namespace
     ├── secret.yaml                  # Database credentials (base64)
     ├── configmap.yaml               # PostgREST / app configuration
@@ -134,6 +135,58 @@ k8s-task-manager/
     ├── frontend-deployment.yaml     # Nginx Frontend Deployment
     ├── frontend-service.yaml        # Frontend ClusterIP Service
     └── ingress.yaml                 # Ingress with path-based routing
+```
+
+---
+
+## GitOps Workflow
+
+This project uses **ArgoCD** as its GitOps controller. Once bootstrapped, the cluster is
+always driven by the state of the `k8s/` directory in the `main` branch — no manual
+`kubectl apply` commands are needed.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     GitOps Loop                             │
+│                                                             │
+│  1. Developer edits a file in k8s/                          │
+│  2. git commit && git push origin main                      │
+│  3. ArgoCD detects diff (polls every 3 min)                 │
+│  4. ArgoCD applies changed manifests to Kind cluster        │
+│  5. Cluster state ≡ Git state  ✅                           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Key ArgoCD Features Enabled
+
+| Feature | Setting | Effect |
+|---------|---------|--------|
+| **Auto Sync** | `automated: {}` | Syncs automatically when Git changes |
+| **Self Heal** | `selfHeal: true` | Reverts any manual `kubectl` changes to match Git |
+| **Prune** | `prune: true` | Deletes K8s resources removed from Git |
+| **Retry** | `limit: 5` | Retries failed syncs with exponential backoff |
+
+### ArgoCD Dashboard
+
+```bash
+# Port-forward the ArgoCD server
+kubectl port-forward svc/argocd-server 8080:443 -n argocd
+
+# Get the admin password
+kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath='{.data.password}' | base64 -d
+
+# Open → https://localhost:8080  (username: admin)
+```
+
+### Check Sync Status via CLI
+
+```bash
+kubectl get application taskmanager -n argocd
+
+# Example output:
+# NAME          SYNC STATUS   HEALTH STATUS
+# taskmanager   Synced        Healthy
 ```
 
 ---
@@ -237,6 +290,7 @@ kind delete cluster --name taskmanager
 - **Resource Management** — CPU and memory requests/limits for every container
 - **Infrastructure as Code** — Entire stack defined as declarative YAML manifests
 - **12-Factor App Principles** — Config in environment, stateless processes, port binding
+- **GitOps (ArgoCD)** — Git as the single source of truth; automated sync, self-healing, and drift detection
 
 ---
 

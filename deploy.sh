@@ -24,6 +24,7 @@ echo -e "${BOLD}${CYAN}╔══════════════════
 echo -e "${BOLD}${CYAN}║        3-Tier Kubernetes Task Manager Deployer          ║${NC}"
 echo -e "${BOLD}${CYAN}║        ─────────────────────────────────────            ║${NC}"
 echo -e "${BOLD}${CYAN}║   Frontend (Nginx) · Backend (PostgREST) · DB (PG)     ║${NC}"
+echo -e "${BOLD}${CYAN}║              ✦ GitOps powered by ArgoCD ✦               ║${NC}"
 echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -34,6 +35,7 @@ K8S_DIR="${SCRIPT_DIR}/k8s"
 KIND_CONFIG="${SCRIPT_DIR}/kind-config.yaml"
 CLUSTER_NAME="taskmanager"
 TIMEOUT="120s"
+ARGOCD_VERSION="v2.11.3"  # ArgoCD release to install
 
 # ─── Verify k8s directory exists ────────────────────────────────────────────────
 if [ ! -d "$K8S_DIR" ]; then
@@ -46,7 +48,9 @@ fi
 if [ "$1" == "--cleanup" ]; then
     echo -e "${BOLD}${RED}🧹 Cleanup Mode${NC}"
     echo ""
-    print_warning "This will delete the entire '${NAMESPACE}' namespace and all its resources."
+    print_warning "This will delete the ArgoCD Application and the '${NAMESPACE}' namespace."
+    print_step "Deleting ArgoCD Application 'taskmanager'..."
+    kubectl delete application taskmanager -n argocd --ignore-not-found=true
     print_step "Deleting namespace '${NAMESPACE}'..."
     kubectl delete namespace "$NAMESPACE" --ignore-not-found=true
     echo ""
@@ -116,106 +120,103 @@ print_success "Nginx Ingress Controller is ready."
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  DEPLOYMENT STEPS
+#  GITOPS SETUP — ArgoCD Installation & Bootstrap
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ── Step 1: Namespace ───────────────────────────────────────────────────────────
-echo -e "${BOLD}── Step 1/10: Namespace ──${NC}"
-print_step "Creating namespace '${NAMESPACE}'..."
-kubectl apply -f "$K8S_DIR/namespace.yaml"
-print_success "Namespace '${NAMESPACE}' is ready."
+# ── Step 1: ArgoCD Namespace ────────────────────────────────────────────────────
+echo -e "${BOLD}── Step 1/4: ArgoCD Namespace ──${NC}"
+print_step "Creating argocd namespace..."
+kubectl apply -f "$K8S_DIR/argocd-namespace.yaml"
+print_success "ArgoCD namespace is ready."
 echo ""
 
-# ── Step 2: Secrets ─────────────────────────────────────────────────────────────
-echo -e "${BOLD}── Step 2/10: Secrets ──${NC}"
-print_step "Applying database secrets..."
-kubectl apply -f "$K8S_DIR/secret.yaml"
-print_success "Secrets applied."
+# ── Step 2: Install ArgoCD ──────────────────────────────────────────────────────
+echo -e "${BOLD}── Step 2/4: Install ArgoCD ──${NC}"
+print_step "Installing ArgoCD ${ARGOCD_VERSION}..."
+kubectl apply -n argocd -f \
+  "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
+echo ""
+print_wait "Waiting for ArgoCD server to be ready (timeout: ${TIMEOUT})..."
+kubectl wait --for=condition=available deployment/argocd-server \
+  -n argocd --timeout="${TIMEOUT}" 2>/dev/null || \
+kubectl wait --for=condition=ready pod \
+  -l app.kubernetes.io/name=argocd-server \
+  -n argocd --timeout="${TIMEOUT}"
+print_success "ArgoCD server is ready."
 echo ""
 
-# ── Step 3: ConfigMaps ──────────────────────────────────────────────────────────
-echo -e "${BOLD}── Step 3/10: ConfigMaps ──${NC}"
-print_step "Applying application and database init ConfigMaps..."
-kubectl apply -f "$K8S_DIR/configmap.yaml"
-kubectl apply -f "$K8S_DIR/db-init-configmap.yaml"
-print_success "ConfigMaps applied."
+# ── Step 3: Bootstrap ArgoCD Application ────────────────────────────────────────
+echo -e "${BOLD}── Step 3/4: Bootstrap Application ──${NC}"
+print_step "Applying ArgoCD Application manifest (taskmanager)..."
+kubectl apply -f "$K8S_DIR/argocd-app.yaml"
+print_success "ArgoCD Application 'taskmanager' created."
+print_info  "ArgoCD will now sync all manifests from Git → cluster automatically."
 echo ""
 
-# ── Step 4: Persistent Volume Claim ─────────────────────────────────────────────
-echo -e "${BOLD}── Step 4/10: Persistent Storage ──${NC}"
-print_step "Creating PersistentVolumeClaim for PostgreSQL..."
-kubectl apply -f "$K8S_DIR/postgres-pvc.yaml"
-print_success "PVC created."
-echo ""
+# ── Step 4: Wait for Initial Sync ───────────────────────────────────────────────
+echo -e "${BOLD}── Step 4/4: Waiting for Initial Sync ──${NC}"
+print_wait "Waiting for ArgoCD to sync the application (this may take 2-3 minutes)..."
+SYNC_TIMEOUT=300
+ELAPSED=0
+INTERVAL=10
+while [ $ELAPSED -lt $SYNC_TIMEOUT ]; do
+    SYNC_STATUS=$(kubectl get application taskmanager -n argocd \
+        -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+    HEALTH_STATUS=$(kubectl get application taskmanager -n argocd \
+        -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
 
-# ── Step 5: Database Tier ───────────────────────────────────────────────────────
-echo -e "${BOLD}── Step 5/10: Database Tier (PostgreSQL) ──${NC}"
-print_step "Deploying PostgreSQL..."
-kubectl apply -f "$K8S_DIR/postgres-deployment.yaml"
-kubectl apply -f "$K8S_DIR/postgres-service.yaml"
-print_success "PostgreSQL deployment and service applied."
-echo ""
+    if [ "$SYNC_STATUS" = "Synced" ] && [ "$HEALTH_STATUS" = "Healthy" ]; then
+        print_success "Application is Synced and Healthy! ✅"
+        break
+    fi
 
-# ── Step 6: Wait for Database ───────────────────────────────────────────────────
-echo -e "${BOLD}── Step 6/10: Waiting for Database ──${NC}"
-print_wait "Waiting for PostgreSQL pod to become ready (timeout: ${TIMEOUT})..."
-kubectl wait --for=condition=ready pod -l tier=database -n "$NAMESPACE" --timeout="$TIMEOUT"
-print_success "PostgreSQL is ready and accepting connections."
-echo ""
+    echo -e "   ${YELLOW}Sync: ${SYNC_STATUS} | Health: ${HEALTH_STATUS}${NC} — waiting..."
+    sleep $INTERVAL
+    ELAPSED=$((ELAPSED + INTERVAL))
+done
 
-# ── Step 7: Backend Tier ────────────────────────────────────────────────────────
-echo -e "${BOLD}── Step 7/10: Backend Tier (PostgREST) ──${NC}"
-print_step "Deploying PostgREST API server..."
-kubectl apply -f "$K8S_DIR/backend-deployment.yaml"
-kubectl apply -f "$K8S_DIR/backend-service.yaml"
-print_success "Backend deployment and service applied."
-echo ""
-
-# ── Step 8: Wait for Backend ───────────────────────────────────────────────────
-echo -e "${BOLD}── Step 8/10: Waiting for Backend ──${NC}"
-print_wait "Waiting for PostgREST pod to become ready (timeout: ${TIMEOUT})..."
-kubectl wait --for=condition=ready pod -l tier=backend -n "$NAMESPACE" --timeout="$TIMEOUT"
-print_success "PostgREST API server is ready."
-echo ""
-
-# ── Step 9: Frontend Tier ──────────────────────────────────────────────────────
-echo -e "${BOLD}── Step 9/10: Frontend Tier (Nginx) ──${NC}"
-print_step "Deploying Nginx frontend..."
-kubectl apply -f "$K8S_DIR/frontend-configmap.yaml"
-kubectl apply -f "$K8S_DIR/frontend-deployment.yaml"
-kubectl apply -f "$K8S_DIR/frontend-service.yaml"
-print_wait "Waiting for Frontend pod to become ready (timeout: ${TIMEOUT})..."
-kubectl wait --for=condition=ready pod -l tier=frontend -n "$NAMESPACE" --timeout="$TIMEOUT"
-print_success "Frontend is ready."
-echo ""
-
-# ── Step 10: Ingress ───────────────────────────────────────────────────────────
-echo -e "${BOLD}── Step 10/10: Ingress ──${NC}"
-print_step "Applying Ingress resource..."
-kubectl apply -f "$K8S_DIR/ingress.yaml"
-print_success "Ingress applied."
+if [ $ELAPSED -ge $SYNC_TIMEOUT ]; then
+    print_warning "Sync is taking longer than expected. Check ArgoCD UI for details."
+fi
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  DEPLOYMENT SUMMARY
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Retrieve ArgoCD admin password
+ARGOCD_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret \
+    -o jsonpath="{.data.password}" 2>/dev/null | base64 -d 2>/dev/null || echo "<run: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d>")
+
 echo -e "${BOLD}${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${GREEN}║            ✅  Deployment Complete!                      ║${NC}"
+echo -e "${BOLD}${GREEN}║         ✅  GitOps Bootstrap Complete!                   ║${NC}"
 echo -e "${BOLD}${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${BOLD}Resources deployed in namespace '${NAMESPACE}':${NC}"
+echo -e "${BOLD}Resources in namespace '${NAMESPACE}' (synced by ArgoCD):${NC}"
 echo ""
-kubectl get all -n "$NAMESPACE"
+kubectl get all -n "$NAMESPACE" 2>/dev/null || print_info "Resources are still syncing..."
 echo ""
-echo -e "${BOLD}${CYAN}── Access Instructions ──${NC}"
+echo -e "${BOLD}${CYAN}── ArgoCD UI ──${NC}"
 echo ""
-print_info "Option 1 — Via Ingress (kind port mapping → localhost:80):"
+print_info "Port-forward the ArgoCD server:"
+echo -e "   ${BOLD}kubectl port-forward svc/argocd-server 8080:443 -n argocd${NC}"
+echo -e "   Then open: ${BOLD}${CYAN}https://localhost:8080${NC}"
+echo ""
+echo -e "   Username: ${BOLD}admin${NC}"
+echo -e "   Password: ${BOLD}${ARGOCD_PASSWORD}${NC}"
+echo ""
+echo -e "${BOLD}${CYAN}── App Access ──${NC}"
+echo ""
+print_info "Option 1 — Via Ingress (kind port mapping):"
 echo -e "   Open: ${BOLD}${CYAN}http://localhost${NC}"
 echo ""
 print_info "Option 2 — Port Forward (if port 80 is occupied):"
-echo -e "   ${BOLD}kubectl port-forward svc/frontend-svc 8080:80 -n ${NAMESPACE}${NC}"
-echo -e "   Then open: ${BOLD}${CYAN}http://localhost:8080${NC}"
+echo -e "   ${BOLD}kubectl port-forward svc/frontend-svc 8081:80 -n ${NAMESPACE}${NC}"
+echo -e "   Then open: ${BOLD}${CYAN}http://localhost:8081${NC}"
+echo ""
+echo -e "${BOLD}${CYAN}── GitOps Workflow ──${NC}"
+echo ""
+echo -e "   Edit any file in ${BOLD}k8s/${NC}  →  ${BOLD}git commit & push${NC}  →  ArgoCD auto-syncs ✅"
 echo ""
 echo -e "${BOLD}${CYAN}── Quick API Test ──${NC}"
 echo ""
@@ -223,6 +224,6 @@ echo -e "   ${BOLD}curl http://localhost/api/tasks${NC}"
 echo ""
 echo -e "${BOLD}${CYAN}── Cleanup ──${NC}"
 echo ""
-echo -e "   ${BOLD}bash deploy.sh --cleanup${NC}   (removes namespace only)"
+echo -e "   ${BOLD}bash deploy.sh --cleanup${NC}   (removes ArgoCD app + taskmanager namespace)"
 echo -e "   ${BOLD}bash deploy.sh --destroy${NC}   (deletes entire kind cluster)"
 echo ""

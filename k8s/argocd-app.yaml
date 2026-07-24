@@ -1,0 +1,47 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: taskmanager
+  namespace: argocd
+  labels:
+    app: taskmanager
+  # Finalizer ensures ArgoCD deletes all managed resources when this Application is deleted
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  # ─── Source ─────────────────────────────────────────────────────────────────
+  # ArgoCD watches this Git repo path for changes to sync
+  source:
+    repoURL: https://github.com/AdastraGupta/3-tier-k8s-project.git
+    targetRevision: main
+    path: k8s
+    # Exclude ArgoCD's own manifests to avoid ArgoCD managing itself from here
+    directory:
+      exclude: "argocd-*.yaml"
+
+  # ─── Destination ────────────────────────────────────────────────────────────
+  # Deploy everything into the taskmanager namespace on the local cluster
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: taskmanager
+
+  # ─── Sync Policy ────────────────────────────────────────────────────────────
+  syncPolicy:
+    automated:
+      # Automatically sync when Git changes are detected
+      selfHeal: true    # Revert any manual kubectl changes to match Git
+      prune: true       # Delete resources that are removed from Git
+    syncOptions:
+      - CreateNamespace=true      # Auto-create taskmanager namespace if missing
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true            # Prune only after all other syncs succeed
+
+  # ─── Retry on failure ────────────────────────────────────────────────────────
+  retryStrategy:
+    limit: 5
+    backoff:
+      duration: 5s
+      factor: 2
+      maxDuration: 3m
