@@ -70,6 +70,7 @@ graph TB
 | Backend    | `postgrest/postgrest:v12.2.3`   | Auto-generates REST API from PostgreSQL schema  |
 | Database   | `postgres:15-alpine`            | Relational database with persistent storage     |
 | GitOps     | ArgoCD `v2.11.3`                | Watches Git and auto-syncs manifests to cluster |
+| IaC        | Terraform `>= 1.6`              | Provisions AWS VPC, EKS cluster, and node groups|
 
 ---
 
@@ -119,6 +120,12 @@ k8s-task-manager/
 ├── README.md                        # This file
 ├── deploy.sh                        # Automated bootstrap script (GitOps-aware)
 ├── kind-config.yaml                 # Kind cluster config with port mappings
+├── terraform/                       # Infrastructure as Code for AWS EKS
+│   ├── provider.tf                  # AWS & Kubernetes provider config
+│   ├── variables.tf                 # Input variables with sensible defaults
+│   ├── vpc.tf                       # VPC, subnets, NAT Gateway
+│   ├── eks.tf                       # EKS cluster, node group, add-ons, IRSA
+│   └── outputs.tf                   # Cluster endpoint, VPC IDs, next-step commands
 └── k8s/
     ├── argocd-namespace.yaml        # ArgoCD namespace
     ├── argocd-app.yaml              # ArgoCD Application CR (GitOps config)
@@ -187,6 +194,65 @@ kubectl get application taskmanager -n argocd
 # Example output:
 # NAME          SYNC STATUS   HEALTH STATUS
 # taskmanager   Synced        Healthy
+```
+
+---
+
+## AWS EKS Deployment (Terraform)
+
+For production deployment, the `terraform/` directory contains Infrastructure as Code
+that provisions a fully production-grade EKS cluster on AWS.
+
+### Prerequisites
+- AWS CLI installed and configured (`aws configure`)
+- Terraform `>= 1.6.0` installed
+- An AWS account with sufficient IAM permissions
+
+### What Terraform Provisions
+
+| Resource | Details |
+|---|---|
+| **VPC** | Dedicated VPC (`10.0.0.0/16`) with DNS enabled |
+| **Subnets** | 2 Public (load balancers) + 2 Private (EKS nodes) across 2 AZs |
+| **NAT Gateway** | Allows private nodes to pull container images |
+| **EKS Cluster** | Kubernetes `1.30` control plane |
+| **Managed Node Group** | 2x `t3.medium` EC2 instances (auto-scaling 1–3) |
+| **EKS Add-ons** | CoreDNS, kube-proxy, VPC CNI, EBS CSI Driver |
+| **IAM / IRSA** | IAM roles for EBS CSI driver via OIDC |
+
+### Deploy to EKS
+
+```bash
+# 1. Initialise Terraform (downloads providers and modules)
+cd terraform
+terraform init
+
+# 2. Preview what will be created (no charges yet)
+terraform plan
+
+# 3. Create the AWS infrastructure (~10-15 minutes)
+terraform apply
+
+# 4. Configure kubectl to point to the new EKS cluster
+aws eks update-kubeconfig --region us-east-1 --name taskmanager-cluster
+
+# 5. Bootstrap ArgoCD on EKS (same as local setup)
+kubectl apply -f k8s/argocd-namespace.yaml
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.11.3/manifests/install.yaml
+kubectl wait --for=condition=available deployment/argocd-server -n argocd --timeout=120s
+kubectl apply -f k8s/argocd-app.yaml
+
+# 6. ArgoCD syncs your application from GitHub automatically ✅
+```
+
+### Tear Down
+
+> [!WARNING]
+> Running `terraform destroy` will delete all AWS resources and is irreversible.
+
+```bash
+cd terraform
+terraform destroy
 ```
 
 ---
@@ -291,6 +357,7 @@ kind delete cluster --name taskmanager
 - **Infrastructure as Code** — Entire stack defined as declarative YAML manifests
 - **12-Factor App Principles** — Config in environment, stateless processes, port binding
 - **GitOps (ArgoCD)** — Git as the single source of truth; automated sync, self-healing, and drift detection
+- **Cloud Infrastructure (Terraform + AWS EKS)** — Production-grade cluster on AWS with VPC, managed node groups, and IRSA
 
 ---
 

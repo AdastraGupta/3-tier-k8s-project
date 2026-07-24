@@ -1,0 +1,51 @@
+# ─── Cluster Info ──────────────────────────────────────────────────────────────
+
+output "cluster_name" {
+  description = "Name of the EKS cluster."
+  value       = module.eks.cluster_name
+}
+
+output "cluster_endpoint" {
+  description = "API server endpoint of the EKS cluster."
+  value       = module.eks.cluster_endpoint
+}
+
+output "cluster_version" {
+  description = "Kubernetes version running on the EKS cluster."
+  value       = module.eks.cluster_version
+}
+
+# ─── Networking ────────────────────────────────────────────────────────────────
+
+output "vpc_id" {
+  description = "ID of the VPC created for this cluster."
+  value       = module.vpc.vpc_id
+}
+
+output "private_subnets" {
+  description = "IDs of the private subnets (where EKS nodes run)."
+  value       = module.vpc.private_subnets
+}
+
+output "public_subnets" {
+  description = "IDs of the public subnets (where load balancers are placed)."
+  value       = module.vpc.public_subnets
+}
+
+# ─── Next Steps ────────────────────────────────────────────────────────────────
+
+output "kubeconfig_command" {
+  description = "Run this command to configure kubectl to talk to your new EKS cluster."
+  value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
+}
+
+output "argocd_bootstrap_commands" {
+  description = "After kubeconfig is set, run these to bootstrap the GitOps layer."
+  value       = <<-EOT
+    kubectl apply -f k8s/argocd-namespace.yaml
+    kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.11.3/manifests/install.yaml
+    kubectl wait --for=condition=available deployment/argocd-server -n argocd --timeout=120s
+    kubectl apply -f k8s/argocd-app.yaml
+    kubectl port-forward svc/argocd-server 8080:443 -n argocd
+  EOT
+}
