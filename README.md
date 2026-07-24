@@ -60,6 +60,11 @@ graph TB
     style SEC fill:#EC407A,stroke:#880E4F,color:#fff
 ```
 
+### AWS Cloud Architecture (EKS + GitOps)
+
+![AWS Architecture Diagram — EKS, VPC, ArgoCD, 3-tier app](aws-architecture.png)
+
+
 ---
 
 ## Tech Stack
