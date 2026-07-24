@@ -37,11 +37,9 @@ spec:
       - CreateNamespace=true      # Auto-create taskmanager namespace if missing
       - PrunePropagationPolicy=foreground
       - PruneLast=true            # Prune only after all other syncs succeed
-
-  # ─── Retry on failure ────────────────────────────────────────────────────────
-  retryStrategy:
-    limit: 5
-    backoff:
-      duration: 5s
-      factor: 2
-      maxDuration: 3m
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
