@@ -1,5 +1,5 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: postgres
   namespace: taskmanager
@@ -7,9 +7,11 @@ metadata:
     app: taskmanager
     tier: database
 spec:
+  serviceName: postgres-svc
   replicas: 1
-  strategy:
-    type: Recreate
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
   selector:
     matchLabels:
       app: taskmanager
@@ -68,9 +70,18 @@ spec:
               cpu: 500m
               memory: 512Mi
       volumes:
-        - name: postgres-storage
-          persistentVolumeClaim:
-            claimName: postgres-pvc
         - name: db-init
           configMap:
             name: db-init-config
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-storage
+        labels:
+          app: taskmanager
+          tier: database
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi

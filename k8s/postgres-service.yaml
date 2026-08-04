@@ -6,11 +6,34 @@ metadata:
   labels:
     app: taskmanager
     tier: database
+
+# ── Local Kind Cluster ─────────────────────────────────────────────────────
+# For local development (Kind), this ClusterIP Service routes traffic to
+# the in-cluster postgres StatefulSet pod (postgres-0) at port 5432.
+#
+# ── AWS EKS (Production) ───────────────────────────────────────────────────
+# After 'terraform apply', change spec.type to "ExternalName" and set
+# spec.externalName to the value from: terraform output rds_address
+# Then remove the selector and clusterIP fields entirely.
+# The backend (PostgREST) connects to postgres-svc:5432 without any changes.
+#
+# Run the patch command from: terraform output rds_k8s_external_service_command
 spec:
-  type: ClusterIP
-  selector:
-    app: taskmanager
-    tier: database
+  # ── LOCAL MODE (default): ClusterIP ────────────────────────────────────────
+  # type: ClusterIP
+  # selector:
+  #   app: taskmanager
+  #   tier: database
+  # ports:
+  #   - port: 5432
+  #     targetPort: 5432
+  #     protocol: TCP
+
+  # ── PRODUCTION MODE: ExternalName ──────────────────────────────────────────
+  # To switch to AWS RDS, replace the entire spec above with:
+  #
+  type: ExternalName
+  externalName: <terraform output rds_address>
   ports:
     - port: 5432
       targetPort: 5432

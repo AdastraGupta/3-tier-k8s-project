@@ -1,0 +1,62 @@
+# ─── Terraform ─────────────────────────────────────────────────────────────────
+# Local .terraform directories
+**/.terraform/
+
+# `.tfstate` files contain sensitive state data (passwords, IP addresses, tokens)
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Terraform variable definitions containing secrets
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# CLI Configuration
+.terraformrc
+terraform.rc
+
+# ─── Secrets & Environment Files ──────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.crt
+
+# ─── Kubernetes / Helm ────────────────────────────────────────────────────────
+kubeconfig
+*.kubeconfig
+.kube/
+
+# ─── Operating System & Editors ───────────────────────────────────────────────
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# VS Code / JetBrains / Editors
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── Antigravity & AI Tool Scratch ────────────────────────────────────────────
+.antigravity/

@@ -49,3 +49,39 @@ output "argocd_bootstrap_commands" {
     kubectl port-forward svc/argocd-server 8080:443 -n argocd
   EOT
 }
+
+# ─── RDS PostgreSQL ────────────────────────────────────────────────────────────
+
+output "rds_endpoint" {
+  description = "Full RDS connection endpoint (host:port). Use this in the PGRST_DB_URI connection string."
+  value       = aws_db_instance.postgres.endpoint
+}
+
+output "rds_address" {
+  description = "Hostname of the RDS instance. Use as the ExternalName in the Kubernetes postgres-svc."
+  value       = aws_db_instance.postgres.address
+}
+
+output "rds_port" {
+  description = "Port of the RDS PostgreSQL instance (5432)."
+  value       = aws_db_instance.postgres.port
+}
+
+output "rds_db_name" {
+  description = "Name of the PostgreSQL database created on the RDS instance."
+  value       = aws_db_instance.postgres.db_name
+}
+
+output "rds_username" {
+  description = "Master username for the RDS PostgreSQL instance."
+  value       = aws_db_instance.postgres.username
+}
+
+output "rds_k8s_external_service_command" {
+  description = "Apply this manifest to wire the Kubernetes postgres-svc to the RDS endpoint after terraform apply."
+  value       = <<-EOT
+    # After 'terraform apply', patch the Kubernetes ExternalName service:
+    kubectl patch svc postgres-svc -n taskmanager \
+      -p '{"spec":{"type":"ExternalName","externalName":"${aws_db_instance.postgres.address}","ports":[{"port":5432,"targetPort":5432}]}}'
+  EOT
+}

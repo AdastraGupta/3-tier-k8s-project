@@ -57,7 +57,7 @@ variable "kubernetes_version" {
 variable "node_instance_type" {
   description = "EC2 instance type for the EKS managed node group."
   type        = string
-  default     = "t3.medium"  # 2 vCPU, 4GB RAM — suitable for this 3-tier app
+  default     = "t3.medium" # 2 vCPU, 4GB RAM — suitable for this 3-tier app
 }
 
 variable "node_min_size" {
@@ -77,3 +77,37 @@ variable "node_desired_size" {
   type        = number
   default     = 2
 }
+
+# ─── RDS PostgreSQL ────────────────────────────────────────────────────────────
+
+variable "rds_instance_class" {
+  description = "DB instance class for AWS RDS PostgreSQL."
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "rds_multi_az" {
+  description = "Enable Multi-AZ deployment for RDS PostgreSQL."
+  type        = bool
+  default     = true
+}
+
+variable "db_name" {
+  description = "Name of the initial database to create in RDS."
+  type        = string
+  default     = "taskdb"
+}
+
+variable "db_username" {
+  description = "Master username for the RDS PostgreSQL database."
+  type        = string
+  default     = "postgres"
+}
+
+variable "db_password" {
+  description = "Master password for the RDS PostgreSQL database."
+  type        = string
+  sensitive   = true
+  default     = "postgres123"
+}
+

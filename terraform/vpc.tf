@@ -15,20 +15,20 @@ module "vpc" {
   public_subnets  = var.public_subnet_cidrs
 
   # NAT Gateway allows private-subnet nodes to pull container images from the internet
-  enable_nat_gateway     = true
-  single_nat_gateway     = true   # Cost saving: one shared NAT GW (use false in prod)
-  enable_dns_hostnames   = true
-  enable_dns_support     = true
+  enable_nat_gateway   = true
+  single_nat_gateway   = true # Cost saving: one shared NAT GW (use false in prod)
+  enable_dns_hostnames = true
+  enable_dns_support   = true
 
   # These subnet tags are REQUIRED for the AWS Load Balancer Controller
   # to correctly discover which subnets to place load balancers in.
   public_subnet_tags = {
-    "kubernetes.io/role/elb"                        = "1"
-    "kubernetes.io/cluster/${var.cluster_name}"     = "shared"
+    "kubernetes.io/role/elb"                    = "1"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   }
 
   private_subnet_tags = {
-    "kubernetes.io/role/internal-elb"               = "1"
-    "kubernetes.io/cluster/${var.cluster_name}"     = "shared"
+    "kubernetes.io/role/internal-elb"           = "1"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   }
 }

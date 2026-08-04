@@ -29,10 +29,9 @@ graph TB
         end
 
         subgraph Database Tier
-            PD["Postgres Deployment\n(postgres:15-alpine)"]
+            PD["Postgres StatefulSet\n(postgres:15-alpine)"]
             PS["postgres-svc\n(ClusterIP :5432)"]
             SEC["secret\n(DB credentials)"]
-            PVC["postgres-pvc\n(Persistent Volume)"]
             DBCM["db-init-configmap\n(init SQL)"]
         end
     end
@@ -49,7 +48,6 @@ graph TB
     PS --> PD
     SEC -.->|env| PD
     DBCM -.->|mount| PD
-    PVC -.->|volume| PD
 
     style User fill:#4FC3F7,stroke:#0277BD,color:#000
     style Ingress fill:#AB47BC,stroke:#6A1B9A,color:#fff
@@ -125,12 +123,14 @@ k8s-task-manager/
 ├── README.md                        # This file
 ├── deploy.sh                        # Automated bootstrap script (GitOps-aware)
 ├── kind-config.yaml                 # Kind cluster config with port mappings
-├── terraform/                       # Infrastructure as Code for AWS EKS
+├── terraform/                       # Infrastructure as Code for AWS EKS & RDS
 │   ├── provider.tf                  # AWS & Kubernetes provider config
 │   ├── variables.tf                 # Input variables with sensible defaults
 │   ├── vpc.tf                       # VPC, subnets, NAT Gateway
 │   ├── eks.tf                       # EKS cluster, node group, add-ons, IRSA
-│   └── outputs.tf                   # Cluster endpoint, VPC IDs, next-step commands
+│   ├── rds.tf                       # AWS RDS PostgreSQL (Multi-AZ) database instance
+│   └── outputs.tf                   # Cluster endpoint, VPC IDs, RDS endpoints
+
 └── k8s/
     ├── argocd-namespace.yaml        # ArgoCD namespace
     ├── argocd-app.yaml              # ArgoCD Application CR (GitOps config)
@@ -138,8 +138,7 @@ k8s-task-manager/
     ├── secret.yaml                  # Database credentials (base64)
     ├── configmap.yaml               # PostgREST / app configuration
     ├── db-init-configmap.yaml       # SQL schema init script
-    ├── postgres-pvc.yaml            # Persistent Volume Claim for DB
-    ├── postgres-deployment.yaml     # PostgreSQL Deployment
+    ├── postgres-statefulset.yaml    # PostgreSQL StatefulSet
     ├── postgres-service.yaml        # PostgreSQL ClusterIP Service
     ├── backend-deployment.yaml      # PostgREST Deployment
     ├── backend-service.yaml         # PostgREST ClusterIP Service
@@ -218,14 +217,15 @@ that provisions a fully production-grade EKS cluster on AWS.
 | Resource | Details |
 |---|---|
 | **VPC** | Dedicated VPC (`10.0.0.0/16`) with DNS enabled |
-| **Subnets** | 2 Public (load balancers) + 2 Private (EKS nodes) across 2 AZs |
+| **Subnets** | 2 Public (load balancers) + 2 Private (EKS nodes & RDS) across 2 AZs |
 | **NAT Gateway** | Allows private nodes to pull container images |
 | **EKS Cluster** | Kubernetes `1.30` control plane |
 | **Managed Node Group** | 2x `t3.medium` EC2 instances (auto-scaling 1–3) |
+| **AWS RDS PostgreSQL** | Multi-AZ managed PostgreSQL 15 instance with automatic failover & private DB subnet group |
 | **EKS Add-ons** | CoreDNS, kube-proxy, VPC CNI, EBS CSI Driver |
 | **IAM / IRSA** | IAM roles for EBS CSI driver via OIDC |
 
-### Deploy to EKS
+### Deploy to EKS & Integrate RDS
 
 ```bash
 # 1. Initialise Terraform (downloads providers and modules)
@@ -235,7 +235,7 @@ terraform init
 # 2. Preview what will be created (no charges yet)
 terraform plan
 
-# 3. Create the AWS infrastructure (~10-15 minutes)
+# 3. Create the AWS infrastructure including EKS & RDS Multi-AZ (~10-15 minutes)
 terraform apply
 
 # 4. Configure kubectl to point to the new EKS cluster
@@ -247,8 +247,15 @@ kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2
 kubectl wait --for=condition=available deployment/argocd-server -n argocd --timeout=120s
 kubectl apply -f k8s/argocd-app.yaml
 
-# 6. ArgoCD syncs your application from GitHub automatically ✅
+# 6. (Optional) Route in-cluster postgres-svc to AWS RDS with zero application code changes:
+#    Patch the postgres-svc Service to ExternalName:
+RDS_ENDPOINT=$(terraform output -raw rds_address)
+kubectl patch svc postgres-svc -n taskmanager \
+  -p "{\"spec\":{\"type\":\"ExternalName\",\"externalName\":\"$RDS_ENDPOINT\"}}"
+
+# 7. ArgoCD syncs your application from GitHub automatically ✅
 ```
+
 
 ### Tear Down
 
@@ -316,14 +323,13 @@ curl -X DELETE "http://localhost:8080/api/tasks?id=eq.1"
 | 3  | ConfigMap    | `app-config`           | PostgREST and application configuration       |
 | 4  | ConfigMap    | `db-init-config`       | SQL init script for schema & seed data        |
 | 5  | ConfigMap    | `frontend-config`      | Nginx reverse-proxy configuration             |
-| 6  | PVC          | `postgres-pvc`         | 1Gi persistent storage for PostgreSQL data    |
-| 7  | Deployment   | `postgres`             | PostgreSQL 15 with health probes              |
-| 8  | Service      | `postgres-svc`         | Internal ClusterIP for database access        |
-| 9  | Deployment   | `backend`              | PostgREST auto-generated REST API             |
-| 10 | Service      | `backend-svc`          | Internal ClusterIP for API access             |
-| 11 | Deployment   | `frontend`             | Nginx serving UI + reverse proxy              |
-| 12 | Service      | `frontend-svc`         | Internal ClusterIP for frontend access        |
-| 13 | Ingress      | `taskmanager-ingress`  | Path-based routing (`/` → UI, `/api` → API)  |
+| 6  | StatefulSet  | `postgres`             | PostgreSQL 15 with health probes & dynamic PVC|
+| 7  | Service      | `postgres-svc`         | Internal ClusterIP for database access        |
+| 8  | Deployment   | `backend`              | PostgREST auto-generated REST API             |
+| 9  | Service      | `backend-svc`          | Internal ClusterIP for API access             |
+| 10 | Deployment   | `frontend`             | Nginx serving UI + reverse proxy              |
+| 11 | Service      | `frontend-svc`         | Internal ClusterIP for frontend access        |
+| 12 | Ingress      | `taskmanager-ingress`  | Path-based routing (`/` → UI, `/api` → API)  |
 
 ---
 

@@ -9,7 +9,7 @@ module "eks" {
 
   # Place the cluster control plane in our VPC
   vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_ids
+  subnet_ids = module.vpc.private_subnets
 
   # Allow kubectl from your local machine to reach the cluster API server
   cluster_endpoint_public_access = true
@@ -30,7 +30,7 @@ module "eks" {
       most_recent = true
     }
     aws-ebs-csi-driver = {
-      most_recent            = true
+      most_recent              = true
       service_account_role_arn = module.ebs_csi_irsa_role.iam_role_arn
     }
   }
@@ -47,9 +47,9 @@ module "eks" {
       desired_size = var.node_desired_size
 
       # Nodes run in private subnets — not exposed to the internet directly
-      subnet_ids = module.vpc.private_subnet_ids
+      subnet_ids = module.vpc.private_subnets
 
-      disk_size = 20  # GB of EBS storage per node
+      disk_size = 20 # GB of EBS storage per node
 
       labels = {
         role = "taskmanager"
