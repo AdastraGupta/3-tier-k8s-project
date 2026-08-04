@@ -13,26 +13,30 @@ A cloud-native task management application deployed on Kubernetes, demonstrating
 graph TB
     User["🌐 User / Browser"]
 
-    subgraph Kubernetes Cluster
-        Ingress["Ingress Controller\n(path-based routing)"]
+    subgraph AWS Cloud
+        subgraph Kubernetes Cluster - EKS
+            Ingress["Ingress Controller\n(path-based routing)"]
 
-        subgraph Frontend Tier
-            FD["Frontend Deployment\n(nginx:1.25-alpine)"]
-            FS["frontend-svc\n(ClusterIP :80)"]
-            FCM["frontend-configmap\n(nginx.conf)"]
+            subgraph Frontend Tier
+                FD["Frontend Deployment\n(nginx:1.25-alpine)"]
+                FS["frontend-svc\n(ClusterIP :80)"]
+                FCM["frontend-configmap\n(nginx.conf)"]
+            end
+
+            subgraph Backend Tier
+                BD["Backend Deployment\n(postgrest/postgrest:v12.2.3)"]
+                BS["backend-svc\n(ClusterIP :3000)"]
+                CM["configmap\n(PostgREST config)"]
+            end
+
+            subgraph Database Service
+                PS["postgres-svc\n(ExternalName → RDS)"]
+                SEC["secret\n(DB credentials)"]
+            end
         end
 
-        subgraph Backend Tier
-            BD["Backend Deployment\n(postgrest/postgrest:v12.2.3)"]
-            BS["backend-svc\n(ClusterIP :3000)"]
-            CM["configmap\n(PostgREST config)"]
-        end
-
-        subgraph Database Tier
-            PD["Postgres StatefulSet\n(postgres:15-alpine)"]
-            PS["postgres-svc\n(ClusterIP :5432)"]
-            SEC["secret\n(DB credentials)"]
-            DBCM["db-init-configmap\n(init SQL)"]
+        subgraph AWS Managed Services
+            RDS["AWS RDS PostgreSQL 15\nMulti-AZ (Primary + Standby)"]
         end
     end
 
@@ -45,16 +49,14 @@ graph TB
     CM -.->|env| BD
     SEC -.->|env| BD
     BD -->|TCP :5432| PS
-    PS --> PD
-    SEC -.->|env| PD
-    DBCM -.->|mount| PD
+    PS -->|ExternalName DNS| RDS
 
     style User fill:#4FC3F7,stroke:#0277BD,color:#000
     style Ingress fill:#AB47BC,stroke:#6A1B9A,color:#fff
     style FD fill:#66BB6A,stroke:#2E7D32,color:#000
     style BD fill:#FFA726,stroke:#E65100,color:#000
-    style PD fill:#EF5350,stroke:#B71C1C,color:#fff
-    style PVC fill:#FFEE58,stroke:#F9A825,color:#000
+    style RDS fill:#EF5350,stroke:#B71C1C,color:#fff
+    style PS fill:#FFEE58,stroke:#F9A825,color:#000
     style SEC fill:#EC407A,stroke:#880E4F,color:#fff
 ```
 
@@ -71,9 +73,9 @@ graph TB
 | ---------- | ------------------------------- | ---------------------------------------------- |
 | Frontend   | `nginx:1.25-alpine`             | Serves static UI & reverse-proxies API requests |
 | Backend    | `postgrest/postgrest:v12.2.3`   | Auto-generates REST API from PostgreSQL schema  |
-| Database   | `postgres:15-alpine`            | Relational database with persistent storage     |
+| Database   | AWS RDS PostgreSQL 15           | Fully managed Multi-AZ relational database     |
 | GitOps     | ArgoCD `v2.11.3`                | Watches Git and auto-syncs manifests to cluster |
-| IaC        | Terraform `>= 1.6`              | Provisions AWS VPC, EKS cluster, and node groups|
+| IaC        | Terraform `>= 1.6`              | Provisions AWS VPC, EKS cluster, RDS, and IAM  |
 
 ---
 
@@ -137,9 +139,9 @@ k8s-task-manager/
     ├── namespace.yaml               # taskmanager namespace
     ├── secret.yaml                  # Database credentials (base64)
     ├── configmap.yaml               # PostgREST / app configuration
-    ├── db-init-configmap.yaml       # SQL schema init script
-    ├── postgres-statefulset.yaml    # PostgreSQL StatefulSet
-    ├── postgres-service.yaml        # PostgreSQL ClusterIP Service
+    ├── db-init-configmap.yaml       # SQL schema init script (for local Kind dev only)
+    ├── postgres-statefulset.yaml    # PostgreSQL StatefulSet (local Kind dev only)
+    ├── postgres-service.yaml        # ClusterIP (local) / ExternalName → AWS RDS (prod)
     ├── backend-deployment.yaml      # PostgREST Deployment
     ├── backend-service.yaml         # PostgREST ClusterIP Service
     ├── frontend-configmap.yaml      # Nginx reverse-proxy config + UI
