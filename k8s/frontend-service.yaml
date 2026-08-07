@@ -6,13 +6,17 @@ metadata:
   labels:
     app: taskmanager
     tier: frontend
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "external"
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "instance"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   selector:
     app: taskmanager
     tier: frontend
   ports:
-    - name: http-web        # Istio protocol hint: treat as HTTP (enables L7 features)
+    - name: http-web
       port: 80
       targetPort: 80
       protocol: TCP
