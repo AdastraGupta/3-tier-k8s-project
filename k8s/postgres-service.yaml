@@ -34,7 +34,7 @@ spec:
   # To switch to AWS RDS, replace the entire spec above with:
   #
   type: ExternalName
-  externalName: <terraform output rds_address>
+  externalName: taskmanager-cluster-postgres.cihucisyi0nw.us-east-1.rds.amazonaws.com
   ports:
     - name: tcp-postgres    # Istio protocol hint: raw TCP passthrough (required for DB)
       port: 5432

@@ -12,13 +12,14 @@ module "eks" {
   subnet_ids = module.vpc.private_subnets
 
   # Allow kubectl from your local machine to reach the cluster API server
-  cluster_endpoint_public_access = true
+  cluster_endpoint_public_access           = true
+  enable_cluster_creator_admin_permissions = true
 
   # Enable CloudWatch logging for the control plane
   cluster_enabled_log_types = ["api", "audit", "authenticator"]
 
   # ─── EKS Add-ons ─────────────────────────────────────────────────────────────
-  # These are AWS-managed versions of core cluster components.
+  # Essential AWS-managed core networking and DNS add-ons.
   cluster_addons = {
     coredns = {
       most_recent = true
@@ -29,18 +30,6 @@ module "eks" {
     vpc-cni = {
       most_recent = true
     }
-    aws-ebs-csi-driver = {
-      most_recent              = true
-      service_account_role_arn = module.ebs_csi_irsa_role.iam_role_arn
-    }
-    # Amazon CloudWatch Observability Add-on:
-    # Deploys the CloudWatch Agent DaemonSet + FluentBit in amazon-cloudwatch namespace.
-    # The agent scrapes Prometheus /metrics endpoints and sends them to CloudWatch
-    # as EMF (Embedded Metric Format) logs → CloudWatch Metrics automatically.
-    amazon-cloudwatch-observability = {
-      most_recent              = true
-      service_account_role_arn = module.cloudwatch_observability_irsa_role.iam_role_arn
-    }
   }
 
   # ─── Managed Node Group ───────────────────────────────────────────────────────
@@ -48,9 +37,8 @@ module "eks" {
   # Configured to use SPOT instances for ~70% cost savings compared to On-Demand.
   eks_managed_node_groups = {
     taskmanager_nodes = {
-      capacity_type  = "SPOT"
       ami_type       = "AL2_x86_64"
-      instance_types = [var.node_instance_type, "t3a.medium"]
+      instance_types = [var.node_instance_type]
 
       min_size     = var.node_min_size
       max_size     = var.node_max_size

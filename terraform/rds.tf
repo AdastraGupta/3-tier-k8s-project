@@ -82,7 +82,7 @@ resource "aws_db_instance" "postgres" {
   publicly_accessible    = false # Only accessible from inside the VPC
 
   # ── Backup & Maintenance ─────────────────────────────────────────────────────
-  backup_retention_period = 7             # Retain automated backups for 7 days
+  backup_retention_period = 1             # AWS Free Tier limit: max 1 day backup retention
   backup_window           = "03:00-04:00" # UTC — low-traffic window
   maintenance_window      = "Mon:04:00-Mon:05:00"
   deletion_protection     = false # Set to true for production to prevent accidental deletion

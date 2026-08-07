@@ -89,8 +89,8 @@ output "rds_k8s_external_service_command" {
 # ─── Istio Service Mesh ────────────────────────────────────────────────────────
 
 output "istio_ingress_hostname" {
-  description = "AWS NLB DNS hostname for the Istio IngressGateway. Use this as your application's public endpoint."
-  value       = "Run after apply: kubectl get svc istio-ingressgateway -n istio-system -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'"
+  description = "Access command for Istio IngressGateway NodePort service."
+  value       = "kubectl port-forward svc/istio-ingressgateway 8080:80 -n istio-system"
 }
 
 output "istio_bootstrap_commands" {

@@ -57,7 +57,7 @@ variable "kubernetes_version" {
 variable "node_instance_type" {
   description = "EC2 instance type for the EKS managed node group."
   type        = string
-  default     = "t3.medium" # 2 vCPU, 4GB RAM — suitable for this 3-tier app
+  default     = "t3.small" # 2 vCPU, 2GB RAM — optimal low-cost instance for EKS add-ons
 }
 
 variable "node_min_size" {
@@ -75,7 +75,7 @@ variable "node_max_size" {
 variable "node_desired_size" {
   description = "Desired number of nodes in the managed node group."
   type        = number
-  default     = 1 # Cost optimized: 1 node for non-prod
+  default     = 2 # 2 nodes required for EKS ENI pod capacity (maxPods limit)
 }
 
 # ─── RDS PostgreSQL ────────────────────────────────────────────────────────────

@@ -54,7 +54,7 @@ resource "helm_release" "istiod" {
   # ── Pilot tuning ─────────────────────────────────────────────────────────────
   set {
     name  = "pilot.replicaCount"
-    value = "2" # 2 replicas for HA in prod
+    value = "1" # 1 replica for single-node / cost-optimized setup
   }
 
   set {
@@ -104,29 +104,20 @@ resource "helm_release" "istio_ingressgateway" {
   chart      = "gateway"
   version    = "1.22.3"
   namespace  = kubernetes_namespace.istio_system.metadata[0].name
+  wait       = false
 
-  # ── NLB Service Annotations ───────────────────────────────────────────────────
-  # These annotations are read by the AWS Load Balancer Controller to create
-  # an internet-facing NLB in the public subnets defined in vpc.tf.
+  # ── NodePort Service Config ──────────────────────────────────────────────────
+  # Uses NodePort service type (bypasses AWS LoadBalancer account permissions
+  # and avoids AWS ELB hourly costs).
   set {
-    name  = "service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-type"
-    value = "nlb"
-  }
-
-  set {
-    name  = "service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-scheme"
-    value = "internet-facing"
-  }
-
-  set {
-    name  = "service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-cross-zone-load-balancing-enabled"
-    value = "true"
+    name  = "service.type"
+    value = "NodePort"
   }
 
   # ── Gateway replica count ─────────────────────────────────────────────────────
   set {
     name  = "replicaCount"
-    value = "2" # 2 gateway pods for HA across AZs
+    value = "1" # 1 gateway pod for single-node / cost-optimized setup
   }
 
   set {
