@@ -13,52 +13,75 @@ A cloud-native task management application deployed on Kubernetes, demonstrating
 graph TB
     User["🌐 User / Browser"]
 
-    subgraph AWS Cloud
-        subgraph Kubernetes Cluster - EKS
-            Ingress["Ingress Controller\n(path-based routing)"]
+    subgraph AWS Cloud Infrastructure
+        NLB["AWS Network Load Balancer (NLB)"]
 
-            subgraph Frontend Tier
-                FD["Frontend Deployment\n(nginx:1.25-alpine)"]
-                FS["frontend-svc\n(ClusterIP :80)"]
-                FCM["frontend-configmap\n(nginx.conf)"]
+        subgraph Amazon EKS Cluster
+            subgraph istio-system Namespace
+                IGW["Istio IngressGateway\n(Port 80 / Envoy)"]
+                Istiod["Istiod Control Plane\n(Pilot / Citadel mTLS CA)"]
             end
 
-            subgraph Backend Tier
-                BD["Backend Deployment\n(postgrest/postgrest:v12.2.3)"]
-                BS["backend-svc\n(ClusterIP :3000)"]
-                CM["configmap\n(PostgREST config)"]
+            subgraph taskmanager Namespace - istio-injection=enabled
+                subgraph Frontend Tier
+                    FD["Frontend Pod\n(nginx:1.25-alpine)"]
+                    F_Envoy["Envoy Sidecar\n(mTLS Proxy)"]
+                    FS["frontend-svc\n(ClusterIP :80)"]
+                end
+
+                subgraph Backend Tier
+                    BD["Backend Pod\n(postgrest/postgrest:v12.2.3)"]
+                    B_Envoy["Envoy Sidecar\n(mTLS Proxy)"]
+                    BS["backend-svc\n(ClusterIP :3000)"]
+                end
+
+                subgraph Database Layer
+                    PS["postgres-svc\n(ExternalName → RDS)"]
+                end
+
+                Authz["Istio PeerAuthentication (STRICT mTLS)\n+ AuthorizationPolicies (SPIFFE Identity)"]
             end
 
-            subgraph Database Service
-                PS["postgres-svc\n(ExternalName → RDS)"]
-                SEC["secret\n(DB credentials)"]
+            subgraph amazon-cloudwatch Namespace
+                CWAgent["CloudWatch Agent DaemonSet\n(Prometheus Scraper)"]
             end
         end
 
-        subgraph AWS Managed Services
-            RDS["AWS RDS PostgreSQL 15\nMulti-AZ (Primary + Standby)"]
+        subgraph AWS Observability & Storage
+            RDS["AWS RDS PostgreSQL 15\n(Single-AZ / Multi-AZ)"]
+            CWLogs["CloudWatch Logs / EMF\n(/aws/containerinsights)"]
+            CWDash["CloudWatch Dashboard & Alarms\n(taskmanager-cluster-observability)"]
         end
     end
 
-    User -->|HTTP| Ingress
-    Ingress -->|"/ (UI)"| FS
-    Ingress -->|"/api/*"| BS
-    FS --> FD
-    FCM -.->|mount| FD
-    BS --> BD
-    CM -.->|env| BD
-    SEC -.->|env| BD
-    BD -->|TCP :5432| PS
-    PS -->|ExternalName DNS| RDS
+    User -->|HTTP| NLB
+    NLB -->|TCP :80| IGW
+    IGW -->|VirtualService: /| FS
+    IGW -->|VirtualService: /api| BS
+    FS --> F_Envoy
+    F_Envoy --- FD
+    BS --> B_Envoy
+    B_Envoy --- BD
+    B_Envoy == "mTLS STRICT (TCP :5432)" ==> PS
+    PS -->|DNS| RDS
+
+    BD -.-|Prometheus /metrics| CWAgent
+    FD -.-|Prometheus /metrics| CWAgent
+    CWAgent -->|EMF Logs| CWLogs
+    CWLogs --> CWDash
 
     style User fill:#4FC3F7,stroke:#0277BD,color:#000
-    style Ingress fill:#AB47BC,stroke:#6A1B9A,color:#fff
+    style NLB fill:#FF9900,stroke:#232F3E,color:#000
+    style IGW fill:#4285F4,stroke:#1A73E8,color:#fff
+    style Istiod fill:#4285F4,stroke:#1A73E8,color:#fff
     style FD fill:#66BB6A,stroke:#2E7D32,color:#000
     style BD fill:#FFA726,stroke:#E65100,color:#000
     style RDS fill:#EF5350,stroke:#B71C1C,color:#fff
-    style PS fill:#FFEE58,stroke:#F9A825,color:#000
-    style SEC fill:#EC407A,stroke:#880E4F,color:#fff
+    style CWAgent fill:#FF9900,stroke:#232F3E,color:#fff
+    style CWDash fill:#FF9900,stroke:#232F3E,color:#fff
+    style Authz fill:#AB47BC,stroke:#6A1B9A,color:#fff
 ```
+
 
 ### AWS Cloud Architecture (EKS + GitOps)
 
