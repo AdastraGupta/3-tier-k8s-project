@@ -86,37 +86,6 @@ output "rds_k8s_external_service_command" {
   EOT
 }
 
-# ─── Istio Service Mesh ────────────────────────────────────────────────────────
-
-output "istio_ingress_hostname" {
-  description = "Access command for Istio IngressGateway NodePort service."
-  value       = "kubectl port-forward svc/istio-ingressgateway 8080:80 -n istio-system"
-}
-
-output "istio_bootstrap_commands" {
-  description = "Commands to verify the Istio installation and retrieve the public NLB hostname."
-  value       = <<-EOT
-    # 1. Verify Istio control plane is healthy:
-    kubectl get pods -n istio-system
-
-    # 2. Get Istio IngressGateway NLB public hostname:
-    kubectl get svc istio-ingressgateway -n istio-system -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
-
-    # 3. Verify sidecars are injected in taskmanager (should show 2/2 READY):
-    kubectl get pods -n taskmanager
-
-    # 4. Check mTLS is enforced (STRICT mode):
-    kubectl get peerauthentication -n taskmanager
-
-    # 5. Verify AuthorizationPolicies are in place:
-    kubectl get authorizationpolicy -n taskmanager
-
-    # 6. (Optional) Deploy Kiali service graph:
-    kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/addons/kiali.yaml -n istio-system
-    kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/addons/prometheus.yaml -n istio-system
-    kubectl port-forward svc/kiali 20001:20001 -n istio-system
-  EOT
-}
 
 # ─── CloudWatch Observability ──────────────────────────────────────────────────
 
