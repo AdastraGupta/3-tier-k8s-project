@@ -3,13 +3,6 @@ kind: Service
 metadata:
   name: frontend-svc
   namespace: taskmanager
-  labels:
-    app: taskmanager
-    tier: frontend
-  annotations:
-    service.beta.kubernetes.io/aws-load-balancer-type: "external"
-    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "instance"
-    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
 spec:
   type: LoadBalancer
   selector:
