@@ -13,41 +13,41 @@ A cloud-native task management application deployed on Kubernetes, demonstrating
 graph TB
     User["🌐 User / Browser"]
 
-    subgraph AWS Cloud Infrastructure
+    subgraph "AWS Cloud Infrastructure"
         NLB["AWS Network Load Balancer (NLB)"]
 
-        subgraph Amazon EKS Cluster
-            subgraph istio-system Namespace
+        subgraph "Amazon EKS Cluster"
+            subgraph "istio-system Namespace"
                 IGW["Istio IngressGateway\n(Port 80 / Envoy)"]
                 Istiod["Istiod Control Plane\n(Pilot / Citadel mTLS CA)"]
             end
 
-            subgraph taskmanager Namespace - istio-injection=enabled
-                subgraph Frontend Tier
+            subgraph "taskmanager Namespace (istio-injection=enabled)"
+                subgraph "Frontend Tier"
                     FD["Frontend Pod\n(nginx:1.25-alpine)"]
                     F_Envoy["Envoy Sidecar\n(mTLS Proxy)"]
                     FS["frontend-svc\n(ClusterIP :80)"]
                 end
 
-                subgraph Backend Tier
+                subgraph "Backend Tier"
                     BD["Backend Pod\n(postgrest/postgrest:v12.2.3)"]
                     B_Envoy["Envoy Sidecar\n(mTLS Proxy)"]
                     BS["backend-svc\n(ClusterIP :3000)"]
                 end
 
-                subgraph Database Layer
+                subgraph "Database Layer"
                     PS["postgres-svc\n(ExternalName → RDS)"]
                 end
 
                 Authz["Istio PeerAuthentication (STRICT mTLS)\n+ AuthorizationPolicies (SPIFFE Identity)"]
             end
 
-            subgraph amazon-cloudwatch Namespace
+            subgraph "amazon-cloudwatch Namespace"
                 CWAgent["CloudWatch Agent DaemonSet\n(Prometheus Scraper)"]
             end
         end
 
-        subgraph AWS Observability & Storage
+        subgraph "AWS Observability & Storage"
             RDS["AWS RDS PostgreSQL 15\n(Single-AZ / Multi-AZ)"]
             CWLogs["CloudWatch Logs / EMF\n(/aws/containerinsights)"]
             CWDash["CloudWatch Dashboard & Alarms\n(taskmanager-cluster-observability)"]
