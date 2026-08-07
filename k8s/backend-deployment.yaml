@@ -17,7 +17,14 @@ spec:
       labels:
         app: taskmanager
         tier: backend
+      annotations:
+        # CloudWatch Agent discovers and scrapes this pod's Prometheus metrics endpoint.
+        # Metrics are sent to CloudWatch Logs (EMF) → ContainerInsights/Prometheus namespace.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
     spec:
+      serviceAccountName: backend-sa  # Istio SPIFFE identity: cluster.local/ns/taskmanager/sa/backend-sa
       containers:
         - name: postgrest
           image: postgrest/postgrest:v12.2.3

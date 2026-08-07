@@ -75,7 +75,7 @@ variable "node_max_size" {
 variable "node_desired_size" {
   description = "Desired number of nodes in the managed node group."
   type        = number
-  default     = 2
+  default     = 1 # Cost optimized: 1 node for non-prod
 }
 
 # ─── RDS PostgreSQL ────────────────────────────────────────────────────────────
@@ -87,9 +87,9 @@ variable "rds_instance_class" {
 }
 
 variable "rds_multi_az" {
-  description = "Enable Multi-AZ deployment for RDS PostgreSQL."
+  description = "Enable Multi-AZ deployment for RDS PostgreSQL (false for cost savings)."
   type        = bool
-  default     = true
+  default     = false # Cost optimized: Single-AZ (saves 50% on RDS)
 }
 
 variable "db_name" {

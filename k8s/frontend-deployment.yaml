@@ -17,7 +17,14 @@ spec:
       labels:
         app: taskmanager
         tier: frontend
+      annotations:
+        # CloudWatch Agent discovers and scrapes this pod's Prometheus metrics endpoint.
+        # Metrics are sent to CloudWatch Logs (EMF) → ContainerInsights/Prometheus namespace.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "80"
+        prometheus.io/path: "/metrics"
     spec:
+      serviceAccountName: frontend-sa  # Istio SPIFFE identity: cluster.local/ns/taskmanager/sa/frontend-sa
       containers:
         - name: nginx
           image: nginx:1.25-alpine

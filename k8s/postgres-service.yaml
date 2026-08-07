@@ -25,7 +25,8 @@ spec:
   #   app: taskmanager
   #   tier: database
   # ports:
-  #   - port: 5432
+  #   - name: tcp-postgres    # Istio protocol hint: raw TCP passthrough (required for DB)
+  #     port: 5432
   #     targetPort: 5432
   #     protocol: TCP
 
@@ -35,6 +36,7 @@ spec:
   type: ExternalName
   externalName: <terraform output rds_address>
   ports:
-    - port: 5432
+    - name: tcp-postgres    # Istio protocol hint: raw TCP passthrough (required for DB)
+      port: 5432
       targetPort: 5432
       protocol: TCP

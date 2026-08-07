@@ -12,6 +12,7 @@ spec:
     app: taskmanager
     tier: backend
   ports:
-    - port: 3000
+    - name: http-api        # Istio protocol hint: treat as HTTP (enables L7 features)
+      port: 3000
       targetPort: 3000
       protocol: TCP

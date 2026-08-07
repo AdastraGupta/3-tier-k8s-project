@@ -12,6 +12,7 @@ spec:
     app: taskmanager
     tier: frontend
   ports:
-    - port: 80
+    - name: http-web        # Istio protocol hint: treat as HTTP (enables L7 features)
+      port: 80
       targetPort: 80
       protocol: TCP

@@ -33,14 +33,24 @@ module "eks" {
       most_recent              = true
       service_account_role_arn = module.ebs_csi_irsa_role.iam_role_arn
     }
+    # Amazon CloudWatch Observability Add-on:
+    # Deploys the CloudWatch Agent DaemonSet + FluentBit in amazon-cloudwatch namespace.
+    # The agent scrapes Prometheus /metrics endpoints and sends them to CloudWatch
+    # as EMF (Embedded Metric Format) logs → CloudWatch Metrics automatically.
+    amazon-cloudwatch-observability = {
+      most_recent              = true
+      service_account_role_arn = module.cloudwatch_observability_irsa_role.iam_role_arn
+    }
   }
 
   # ─── Managed Node Group ───────────────────────────────────────────────────────
   # AWS fully manages the lifecycle of these EC2 nodes (patching, replacement, etc.)
+  # Configured to use SPOT instances for ~70% cost savings compared to On-Demand.
   eks_managed_node_groups = {
     taskmanager_nodes = {
+      capacity_type  = "SPOT"
       ami_type       = "AL2_x86_64"
-      instance_types = [var.node_instance_type]
+      instance_types = [var.node_instance_type, "t3a.medium"]
 
       min_size     = var.node_min_size
       max_size     = var.node_max_size
@@ -75,6 +85,27 @@ module "ebs_csi_irsa_role" {
     ex = {
       provider_arn               = module.eks.oidc_provider_arn
       namespace_service_accounts = ["kube-system:ebs-csi-controller-sa"]
+    }
+  }
+}
+
+# ─── IRSA Role for CloudWatch Observability Agent ──────────────────────────────
+# Grants the CloudWatch Agent DaemonSet permission to:
+#   - Put metric data to CloudWatch Metrics (ContainerInsights / Prometheus EMF)
+#   - Put log events to CloudWatch Logs
+#   - Describe EC2 metadata for node-level enrichment
+# Bound to the "cloudwatch-agent" ServiceAccount in the "amazon-cloudwatch" namespace.
+module "cloudwatch_observability_irsa_role" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "~> 5.0"
+
+  role_name                              = "${var.cluster_name}-cloudwatch-observability"
+  attach_cloudwatch_observability_policy = true
+
+  oidc_providers = {
+    ex = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["amazon-cloudwatch:cloudwatch-agent"]
     }
   }
 }

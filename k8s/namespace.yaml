@@ -4,3 +4,4 @@ metadata:
   name: taskmanager
   labels:
     app: taskmanager
+    istio-injection: enabled  # Enables automatic Envoy sidecar injection for all pods in this namespace

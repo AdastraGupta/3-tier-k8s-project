@@ -69,13 +69,16 @@ graph TB
 
 ## Tech Stack
 
-| Component  | Image / Tool                    | Purpose                                        |
-| ---------- | ------------------------------- | ---------------------------------------------- |
-| Frontend   | `nginx:1.25-alpine`             | Serves static UI & reverse-proxies API requests |
-| Backend    | `postgrest/postgrest:v12.2.3`   | Auto-generates REST API from PostgreSQL schema  |
-| Database   | AWS RDS PostgreSQL 15           | Fully managed Multi-AZ relational database     |
-| GitOps     | ArgoCD `v2.11.3`                | Watches Git and auto-syncs manifests to cluster |
-| IaC        | Terraform `>= 1.6`              | Provisions AWS VPC, EKS cluster, RDS, and IAM  |
+| Component      | Image / Tool                    | Purpose                                        |
+| -------------- | ------------------------------- | ---------------------------------------------- |
+| **Frontend**   | `nginx:1.25-alpine`             | Serves static UI & reverse-proxies API requests |
+| **Backend**    | `postgrest/postgrest:v12.2.3`   | Auto-generates REST API from PostgreSQL schema  |
+| **Database**   | AWS RDS PostgreSQL 15           | Fully managed relational database (Multi-AZ / Single-AZ) |
+| **Service Mesh** | Istio `v1.22.3`               | Zero-trust STRICT mTLS, L7 traffic routing, DestinationRules |
+| **Observability** | AWS CloudWatch + Prometheus   | Embedded Metric Format (EMF) logs, Container Insights & Alarms |
+| **GitOps**     | ArgoCD `v2.11.3`                | Watches Git and auto-syncs manifests to cluster |
+| **IaC**        | Terraform `>= 1.6`              | Provisions AWS VPC, EKS cluster, RDS, Istio Helm, and IAM |
+| **Compute**    | EC2 Spot Instances (`t3.medium`) | Reduced node cost by ~70% using AWS Spot capacity |
 
 ---
 
@@ -371,6 +374,31 @@ kind delete cluster --name taskmanager
 - **12-Factor App Principles** — Config in environment, stateless processes, port binding
 - **GitOps (ArgoCD)** — Git as the single source of truth; automated sync, self-healing, and drift detection
 - **Cloud Infrastructure (Terraform + AWS EKS)** — Production-grade cluster on AWS with VPC, managed node groups, and IRSA
+- **Service Mesh (Istio)** — Zero-trust mTLS encryption, L7 traffic management, retry/timeout resilience, and DestinationRule circuit breaking
+- **Cloud Observability (AWS CloudWatch + Prometheus)** — Container Insights, Embedded Metric Format (EMF) log stream ingestion, unified dashboards, and metric alarms
+- **AWS Cost Optimization** — EC2 Spot instance capacity, single-AZ DB option, and right-sized compute nodes for non-prod savings (~70% savings)
+
+---
+
+## Service Mesh & Observability
+
+### Istio Service Mesh (PROD / AWS EKS)
+
+The project incorporates **Istio Service Mesh** installed declaratively via Terraform Helm releases (`istio-base`, `istiod`, `istio-ingressgateway`):
+
+- **Zero-Trust Security**: `PeerAuthentication` enforces `STRICT` mutual TLS (mTLS) across all pods in `taskmanager`.
+- **Fine-Grained Authorization**: `AuthorizationPolicy` resources restrict network traffic using SPIFFE identities (`frontend-sa`, `backend-sa`, `postgres-sa`). Only `backend-sa` is authorized to access `postgres-svc:5432`.
+- **Traffic Management**: Istio `Gateway` & `VirtualService` handle path-based routing (`/` → frontend, `/api` → backend with `/api` prefix stripping), 3x retry policies, and per-route timeouts.
+- **Circuit Breaking**: `DestinationRule` resources configure connection pool limits and 5xx error outlier detection for fault tolerance.
+
+### AWS CloudWatch Observability (Pattern 1)
+
+Monitoring is powered by the **Amazon CloudWatch Observability EKS Add-on**:
+
+- **Prometheus Metric Ingestion**: Scrapes `/metrics` from annotated pods (`prometheus.io/scrape: "true"`) and streams metrics as Embedded Metric Format (EMF) logs to `/aws/containerinsights/taskmanager-cluster/prometheus`.
+- **Unified CloudWatch Dashboard**: Realtime 6-widget dashboard displaying PostgREST API request rates, Istio Ingress request volume, EKS pod CPU/memory utilization, and RDS PostgreSQL performance.
+- **CloudWatch Metric Alarms**: Automated alerts for RDS High CPU (>80%), Low Storage (<5GB), Backend 5xx HTTP Errors, and Pod Memory Saturation (>85%).
+
 
 ---
 

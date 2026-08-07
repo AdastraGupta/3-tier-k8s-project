@@ -60,3 +60,6 @@ $RECYCLE.BIN/
 
 # ─── Antigravity & AI Tool Scratch ────────────────────────────────────────────
 .antigravity/
+*.exe
+istioctl
+istioctl.exe

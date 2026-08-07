@@ -43,3 +43,30 @@ spec:
         duration: 5s
         factor: 2
         maxDuration: 3m
+
+  # ─── Ignore Differences ─────────────────────────────────────────────────────
+  # Istio's mutating admission webhook injects the istio-proxy sidecar and
+  # istio-init init container into pods at admission time. These containers exist
+  # in the live cluster state but are NOT present in the Git manifests.
+  # Without this section ArgoCD would perpetually report the app as OutOfSync.
+  ignoreDifferences:
+    # Deployments — sidecar and init container injection
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/template/spec/containers
+        - /spec/template/spec/initContainers
+        - /spec/template/metadata/annotations
+    # StatefulSets (postgres) — same injection occurs
+    - group: apps
+      kind: StatefulSet
+      jsonPointers:
+        - /spec/template/spec/containers
+        - /spec/template/spec/initContainers
+        - /spec/template/metadata/annotations
+    # Services — Istio may add traffic.sidecar annotations
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /metadata/annotations
+

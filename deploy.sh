@@ -91,6 +91,13 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
+if ! command -v helm &> /dev/null; then
+    print_warning "helm is not installed or not in PATH."
+    print_info  "Helm is required for PROD (Istio installation via Terraform)."
+    print_info  "Install from: https://helm.sh/docs/intro/install/"
+    print_info  "Continuing for local Kind deployment..."
+fi
+
 print_success "Pre-flight checks passed."
 echo ""
 
@@ -226,4 +233,33 @@ echo -e "${BOLD}${CYAN}── Cleanup ──${NC}"
 echo ""
 echo -e "   ${BOLD}bash deploy.sh --cleanup${NC}   (removes ArgoCD app + taskmanager namespace)"
 echo -e "   ${BOLD}bash deploy.sh --destroy${NC}   (deletes entire kind cluster)"
+echo ""
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PROD (AWS EKS) — ISTIO SERVICE MESH NOTES
+# ═══════════════════════════════════════════════════════════════════════════════
+echo -e "${BOLD}${CYAN}── PROD (AWS EKS): Istio Service Mesh ──${NC}"
+echo ""
+echo -e "   Istio is installed automatically by Terraform (terraform/istio.tf)."
+echo -e "   After ${BOLD}terraform apply${NC}, run:"
+echo ""
+echo -e "   ${BOLD}# 1. Verify Istio control plane${NC}"
+echo -e "   kubectl get pods -n istio-system"
+echo ""
+echo -e "   ${BOLD}# 2. Get your application's public NLB hostname${NC}"
+echo -e "   kubectl get svc istio-ingressgateway -n istio-system \\"
+echo -e "     -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'"
+echo ""
+echo -e "   ${BOLD}# 3. Verify sidecar injection (each pod should show 2/2 READY)${NC}"
+echo -e "   kubectl get pods -n taskmanager"
+echo ""
+echo -e "   ${BOLD}# 4. Confirm STRICT mTLS is active${NC}"
+echo -e "   kubectl get peerauthentication -n taskmanager"
+echo ""
+echo -e "   ${BOLD}# 5. (Optional) Open Kiali service graph${NC}"
+echo -e "   kubectl port-forward svc/kiali 20001:20001 -n istio-system"
+echo -e "   Then open: ${BOLD}${CYAN}http://localhost:20001${NC}"
+echo ""
+echo -e "   ${BOLD}# 6. Full Istio bootstrap commands${NC}"
+echo -e "   terraform output istio_bootstrap_commands"
 echo ""

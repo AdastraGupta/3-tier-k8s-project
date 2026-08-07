@@ -85,3 +85,73 @@ output "rds_k8s_external_service_command" {
       -p '{"spec":{"type":"ExternalName","externalName":"${aws_db_instance.postgres.address}","ports":[{"port":5432,"targetPort":5432}]}}'
   EOT
 }
+
+# ─── Istio Service Mesh ────────────────────────────────────────────────────────
+
+output "istio_ingress_hostname" {
+  description = "AWS NLB DNS hostname for the Istio IngressGateway. Use this as your application's public endpoint."
+  value       = "Run after apply: kubectl get svc istio-ingressgateway -n istio-system -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'"
+}
+
+output "istio_bootstrap_commands" {
+  description = "Commands to verify the Istio installation and retrieve the public NLB hostname."
+  value       = <<-EOT
+    # 1. Verify Istio control plane is healthy:
+    kubectl get pods -n istio-system
+
+    # 2. Get Istio IngressGateway NLB public hostname:
+    kubectl get svc istio-ingressgateway -n istio-system -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+
+    # 3. Verify sidecars are injected in taskmanager (should show 2/2 READY):
+    kubectl get pods -n taskmanager
+
+    # 4. Check mTLS is enforced (STRICT mode):
+    kubectl get peerauthentication -n taskmanager
+
+    # 5. Verify AuthorizationPolicies are in place:
+    kubectl get authorizationpolicy -n taskmanager
+
+    # 6. (Optional) Deploy Kiali service graph:
+    kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/addons/kiali.yaml -n istio-system
+    kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/addons/prometheus.yaml -n istio-system
+    kubectl port-forward svc/kiali 20001:20001 -n istio-system
+  EOT
+}
+
+# ─── CloudWatch Observability ──────────────────────────────────────────────────
+
+output "cloudwatch_dashboard_name" {
+  description = "Name of the CloudWatch Dashboard provisioned by Terraform."
+  value       = aws_cloudwatch_dashboard.taskmanager.dashboard_name
+}
+
+output "cloudwatch_dashboard_url" {
+  description = "Direct AWS Console URL to open the CloudWatch Dashboard after terraform apply."
+  value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${aws_cloudwatch_dashboard.taskmanager.dashboard_name}"
+}
+
+output "cloudwatch_verification_commands" {
+  description = "Commands to verify CloudWatch Observability is working after terraform apply."
+  value       = <<-EOT
+    # 1. Verify CloudWatch Agent DaemonSet is running on all nodes:
+    kubectl get pods -n amazon-cloudwatch -l app.kubernetes.io/name=cloudwatch-agent
+
+    # 2. Check CloudWatch Agent logs for Prometheus scraping activity:
+    kubectl logs -n amazon-cloudwatch daemonset/cloudwatch-agent -c cloudwatch-agent --tail=50
+
+    # 3. Verify backend pod has Prometheus annotations applied:
+    kubectl get pod -n taskmanager -l tier=backend -o jsonpath='{.items[0].metadata.annotations}'
+
+    # 4. Check the CloudWatch Log Group for EMF Prometheus metrics:
+    aws logs describe-log-streams \
+      --log-group-name /aws/containerinsights/${var.cluster_name}/prometheus \
+      --region ${var.aws_region}
+
+    # 5. List CloudWatch Alarms and their current state:
+    aws cloudwatch describe-alarms \
+      --alarm-name-prefix ${var.cluster_name} \
+      --region ${var.aws_region} \
+      --query 'MetricAlarms[].{Name:AlarmName,State:StateValue}' \
+      --output table
+  EOT
+}
