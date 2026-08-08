@@ -1,430 +1,229 @@
-# 3-Tier Kubernetes Task Manager
+# 3-Tier Task Manager — AWS EKS + GitOps
 
-A cloud-native task management application deployed on Kubernetes, demonstrating production-grade 3-tier architecture with **zero custom application code**. Uses pre-built DockerHub images exclusively — the entire project is pure Kubernetes manifests.
-
-> [!NOTE]
-> This project showcases real-world Kubernetes orchestration skills using battle-tested, off-the-shelf container images. No Dockerfiles, no custom builds — just infrastructure as code.
-
----
+A production-grade, cloud-native **3-tier task manager** application deployed on **AWS EKS** with a fully automated **GitOps** pipeline using ArgoCD.
 
 ## Architecture
 
-```mermaid
-graph TB
-    User["🌐 User / Browser"]
-
-    subgraph "AWS Cloud Infrastructure"
-        NLB["AWS Network Load Balancer (NLB)"]
-
-        subgraph "Amazon EKS Cluster"
-            subgraph "istio-system Namespace"
-                IGW["Istio IngressGateway\n(Port 80 / Envoy)"]
-                Istiod["Istiod Control Plane\n(Pilot / Citadel mTLS CA)"]
-            end
-
-            subgraph "taskmanager Namespace (istio-injection=enabled)"
-                subgraph "Frontend Tier"
-                    FD["Frontend Pod\n(nginx:1.25-alpine)"]
-                    F_Envoy["Envoy Sidecar\n(mTLS Proxy)"]
-                    FS["frontend-svc\n(ClusterIP :80)"]
-                end
-
-                subgraph "Backend Tier"
-                    BD["Backend Pod\n(postgrest/postgrest:v12.2.3)"]
-                    B_Envoy["Envoy Sidecar\n(mTLS Proxy)"]
-                    BS["backend-svc\n(ClusterIP :3000)"]
-                end
-
-                subgraph "Database Layer"
-                    PS["postgres-svc\n(ExternalName → RDS)"]
-                end
-
-                Authz["Istio PeerAuthentication (STRICT mTLS)\n+ AuthorizationPolicies (SPIFFE Identity)"]
-            end
-
-            subgraph "amazon-cloudwatch Namespace"
-                CWAgent["CloudWatch Agent DaemonSet\n(Prometheus Scraper)"]
-            end
-        end
-
-        subgraph "AWS Observability & Storage"
-            RDS["AWS RDS PostgreSQL 15\n(Single-AZ / Multi-AZ)"]
-            CWLogs["CloudWatch Logs / EMF\n(/aws/containerinsights)"]
-            CWDash["CloudWatch Dashboard & Alarms\n(taskmanager-cluster-observability)"]
-        end
-    end
-
-    User -->|HTTP| NLB
-    NLB -->|TCP :80| IGW
-    IGW -->|VirtualService: /| FS
-    IGW -->|VirtualService: /api| BS
-    FS --> F_Envoy
-    F_Envoy --- FD
-    BS --> B_Envoy
-    B_Envoy --- BD
-    B_Envoy == "mTLS STRICT (TCP :5432)" ==> PS
-    PS -->|DNS| RDS
-
-    BD -.-|Prometheus /metrics| CWAgent
-    FD -.-|Prometheus /metrics| CWAgent
-    CWAgent -->|EMF Logs| CWLogs
-    CWLogs --> CWDash
-
-    style User fill:#4FC3F7,stroke:#0277BD,color:#000
-    style NLB fill:#FF9900,stroke:#232F3E,color:#000
-    style IGW fill:#4285F4,stroke:#1A73E8,color:#fff
-    style Istiod fill:#4285F4,stroke:#1A73E8,color:#fff
-    style FD fill:#66BB6A,stroke:#2E7D32,color:#000
-    style BD fill:#FFA726,stroke:#E65100,color:#000
-    style RDS fill:#EF5350,stroke:#B71C1C,color:#fff
-    style CWAgent fill:#FF9900,stroke:#232F3E,color:#fff
-    style CWDash fill:#FF9900,stroke:#232F3E,color:#fff
-    style Authz fill:#AB47BC,stroke:#6A1B9A,color:#fff
 ```
-
-
-### AWS Cloud Architecture (EKS + GitOps)
-
-![AWS Architecture Diagram — EKS, VPC, ArgoCD, 3-tier app](aws-architecture.png)
-
-
----
+┌─────────────────────────────────────────────────────────────────────┐
+│                        AWS EKS Cluster                              │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │                  taskmanager Namespace                       │   │
+│  │                                                              │   │
+│  │   ┌─────────────────┐       ┌──────────────────────┐        │   │
+│  │   │  Frontend Pods  │       │  Backend Pods         │        │   │
+│  │   │  (Nginx / HTML) │       │  (PostgREST v12.2.3) │        │   │
+│  │   │  3 replicas     │       │  2 replicas          │        │   │
+│  │   └────────┬────────┘       └──────────┬───────────┘        │   │
+│  │            │                           │                    │   │
+│  │   frontend-svc (LoadBalancer)    backend-svc (ClusterIP)    │   │
+│  │            │                           │                    │   │
+│  │            │                postgres-svc (ExternalName)     │   │
+│  └────────────│───────────────────────────│────────────────────┘   │
+│               │                           │                         │
+└───────────────│───────────────────────────│─────────────────────────┘
+                │                           │
+          Internet User              AWS RDS PostgreSQL 15
+                                  (taskmanager-cluster-postgres)
+```
 
 ## Tech Stack
 
-| Component      | Image / Tool                    | Purpose                                        |
-| -------------- | ------------------------------- | ---------------------------------------------- |
-| **Frontend**   | `nginx:1.25-alpine`             | Serves static UI & reverse-proxies API requests |
-| **Backend**    | `postgrest/postgrest:v12.2.3`   | Auto-generates REST API from PostgreSQL schema  |
-| **Database**   | AWS RDS PostgreSQL 15           | Fully managed relational database (Multi-AZ / Single-AZ) |
-| **Service Mesh** | Istio `v1.22.3`               | Zero-trust STRICT mTLS, L7 traffic routing, DestinationRules |
-| **Observability** | AWS CloudWatch + Prometheus   | Embedded Metric Format (EMF) logs, Container Insights & Alarms |
-| **GitOps**     | ArgoCD `v2.11.3`                | Watches Git and auto-syncs manifests to cluster |
-| **IaC**        | Terraform `>= 1.6`              | Provisions AWS VPC, EKS cluster, RDS, Istio Helm, and IAM |
-| **Compute**    | EC2 Spot Instances (`t3.medium`) | Reduced node cost by ~70% using AWS Spot capacity |
-
----
-
-## Prerequisites
-
-| Tool                        | Required | Notes                                      |
-| --------------------------- | -------- | ------------------------------------------ |
-| Docker                      | ✅        | Container runtime (kind runs K8s in Docker) |
-| kubectl                     | ✅        | Kubernetes CLI                             |
-| kind                        | ✅        | Local Kubernetes cluster via Docker        |
-| Internet access             | ✅        | ArgoCD is installed from GitHub releases   |
-
----
-
-## Quick Start
-
-```bash
-# 1. Run the automated bootstrap script
-#    This creates the Kind cluster, installs Nginx Ingress, installs ArgoCD,
-#    and bootstraps the ArgoCD Application — all in one command.
-bash deploy.sh
-
-# 2. Access the Task Manager app
-#    → http://localhost            (via Ingress)
-#    → http://localhost:8081       (via port-forward, if port 80 is busy)
-#       kubectl port-forward svc/frontend-svc 8081:80 -n taskmanager
-
-# 3. Access the ArgoCD dashboard
-#    kubectl port-forward svc/argocd-server 8080:443 -n argocd
-#    → https://localhost:8080   (username: admin)
-#    Password: kubectl -n argocd get secret argocd-initial-admin-secret \
-#              -o jsonpath='{.data.password}' | base64 -d
-```
-
-> [!TIP]
-> The `deploy.sh` script handles **everything** automatically — cluster creation, Nginx Ingress, ArgoCD installation, and GitOps bootstrap. Just run `bash deploy.sh`!
-
-> [!NOTE]
-> After bootstrap, **all future deployments are GitOps**: edit any file in `k8s/`, commit, and push to `main` — ArgoCD will automatically sync the changes to the cluster within minutes.
-
----
+| Layer | Technology |
+|---|---|
+| **Container Orchestration** | AWS EKS 1.30 (Managed Node Group, `t3.small`) |
+| **Frontend** | Nginx serving static HTML/CSS/JS |
+| **Backend API** | [PostgREST](https://postgrest.org/) v12.2.3 — auto-generates REST API from PostgreSQL schema |
+| **Database** | AWS RDS PostgreSQL 15 (`db.t4g.micro`, Single-AZ) |
+| **GitOps** | ArgoCD v2.11.3 — continuous delivery from this GitHub repository |
+| **Observability** | AWS CloudWatch (Dashboard + Metric Alarms) |
+| **Infrastructure as Code** | Terraform |
+| **Networking** | Native Kubernetes Ingress, ClusterIP, LoadBalancer, ExternalName services |
 
 ## Project Structure
 
 ```
-k8s-task-manager/
-├── README.md                        # This file
-├── deploy.sh                        # Automated bootstrap script (GitOps-aware)
-├── kind-config.yaml                 # Kind cluster config with port mappings
-├── terraform/                       # Infrastructure as Code for AWS EKS & RDS
-│   ├── provider.tf                  # AWS & Kubernetes provider config
-│   ├── variables.tf                 # Input variables with sensible defaults
-│   ├── vpc.tf                       # VPC, subnets, NAT Gateway
-│   ├── eks.tf                       # EKS cluster, node group, add-ons, IRSA
-│   ├── rds.tf                       # AWS RDS PostgreSQL (Multi-AZ) database instance
-│   └── outputs.tf                   # Cluster endpoint, VPC IDs, RDS endpoints
-
-└── k8s/
-    ├── argocd-namespace.yaml        # ArgoCD namespace
-    ├── argocd-app.yaml              # ArgoCD Application CR (GitOps config)
-    ├── namespace.yaml               # taskmanager namespace
-    ├── secret.yaml                  # Database credentials (base64)
-    ├── configmap.yaml               # PostgREST / app configuration
-    ├── db-init-configmap.yaml       # SQL schema init script (for local Kind dev only)
-    ├── postgres-statefulset.yaml    # PostgreSQL StatefulSet (local Kind dev only)
-    ├── postgres-service.yaml        # ClusterIP (local) / ExternalName → AWS RDS (prod)
-    ├── backend-deployment.yaml      # PostgREST Deployment
-    ├── backend-service.yaml         # PostgREST ClusterIP Service
-    ├── frontend-configmap.yaml      # Nginx reverse-proxy config + UI
-    ├── frontend-deployment.yaml     # Nginx Frontend Deployment
-    ├── frontend-service.yaml        # Frontend ClusterIP Service
-    └── ingress.yaml                 # Ingress with path-based routing
+├── k8s/                        # Kubernetes manifests (synced by ArgoCD)
+│   ├── namespace.yaml          # taskmanager namespace
+│   ├── secret.yaml             # App secrets (RDS credentials, PGRST_DB_URI)
+│   ├── configmap.yaml          # PostgREST configuration (schema, anon role)
+│   ├── frontend-configmap.yaml # Frontend HTML/CSS/JS (served via Nginx)
+│   ├── frontend-deployment.yaml
+│   ├── frontend-service.yaml   # type: LoadBalancer — public internet access
+│   ├── backend-deployment.yaml # PostgREST deployment
+│   ├── backend-service.yaml    # type: ClusterIP
+│   ├── postgres-service.yaml   # type: ExternalName → AWS RDS endpoint
+│   ├── ingress.yaml            # Path-based routing (/ → frontend, /api → backend)
+│   ├── argocd-namespace.yaml   # ArgoCD namespace
+│   └── argocd-app.yaml         # ArgoCD Application manifest
+│
+└── terraform/                  # Infrastructure as Code
+    ├── provider.tf             # AWS + Kubernetes + Helm provider config
+    ├── variables.tf            # All configurable inputs
+    ├── vpc.tf                  # VPC, public/private subnets, NAT Gateway
+    ├── eks.tf                  # EKS cluster + managed node group
+    ├── rds.tf                  # RDS PostgreSQL instance + subnet/security groups
+    ├── cloudwatch.tf           # CloudWatch Log Groups, Dashboard, Metric Alarms
+    └── outputs.tf              # Key outputs (endpoints, commands)
 ```
 
----
+## Prerequisites
 
-## GitOps Workflow
+- AWS CLI configured with appropriate credentials (`aws configure`)
+- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.5
+- [kubectl](https://kubernetes.io/docs/tasks/tools/)
+- [Helm](https://helm.sh/docs/intro/install/)
 
-This project uses **ArgoCD** as its GitOps controller. Once bootstrapped, the cluster is
-always driven by the state of the `k8s/` directory in the `main` branch — no manual
-`kubectl apply` commands are needed.
+## Quick Start
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     GitOps Loop                             │
-│                                                             │
-│  1. Developer edits a file in k8s/                          │
-│  2. git commit && git push origin main                      │
-│  3. ArgoCD detects diff (polls every 3 min)                 │
-│  4. ArgoCD applies changed manifests to Kind cluster        │
-│  5. Cluster state ≡ Git state  ✅                           │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Key ArgoCD Features Enabled
-
-| Feature | Setting | Effect |
-|---------|---------|--------|
-| **Auto Sync** | `automated: {}` | Syncs automatically when Git changes |
-| **Self Heal** | `selfHeal: true` | Reverts any manual `kubectl` changes to match Git |
-| **Prune** | `prune: true` | Deletes K8s resources removed from Git |
-| **Retry** | `limit: 5` | Retries failed syncs with exponential backoff |
-
-### ArgoCD Dashboard
+### 1. Deploy Infrastructure
 
 ```bash
-# Port-forward the ArgoCD server
-kubectl port-forward svc/argocd-server 8080:443 -n argocd
-
-# Get the admin password
-kubectl -n argocd get secret argocd-initial-admin-secret \
-  -o jsonpath='{.data.password}' | base64 -d
-
-# Open → https://localhost:8080  (username: admin)
-```
-
-### Check Sync Status via CLI
-
-```bash
-kubectl get application taskmanager -n argocd
-
-# Example output:
-# NAME          SYNC STATUS   HEALTH STATUS
-# taskmanager   Synced        Healthy
-```
-
----
-
-## AWS EKS Deployment (Terraform)
-
-For production deployment, the `terraform/` directory contains Infrastructure as Code
-that provisions a fully production-grade EKS cluster on AWS.
-
-### Prerequisites
-- AWS CLI installed and configured (`aws configure`)
-- Terraform `>= 1.6.0` installed
-- An AWS account with sufficient IAM permissions
-
-### What Terraform Provisions
-
-| Resource | Details |
-|---|---|
-| **VPC** | Dedicated VPC (`10.0.0.0/16`) with DNS enabled |
-| **Subnets** | 2 Public (load balancers) + 2 Private (EKS nodes & RDS) across 2 AZs |
-| **NAT Gateway** | Allows private nodes to pull container images |
-| **EKS Cluster** | Kubernetes `1.30` control plane |
-| **Managed Node Group** | 2x `t3.medium` EC2 instances (auto-scaling 1–3) |
-| **AWS RDS PostgreSQL** | Multi-AZ managed PostgreSQL 15 instance with automatic failover & private DB subnet group |
-| **EKS Add-ons** | CoreDNS, kube-proxy, VPC CNI, EBS CSI Driver |
-| **IAM / IRSA** | IAM roles for EBS CSI driver via OIDC |
-
-### Deploy to EKS & Integrate RDS
-
-```bash
-# 1. Initialise Terraform (downloads providers and modules)
 cd terraform
 terraform init
-
-# 2. Preview what will be created (no charges yet)
-terraform plan
-
-# 3. Create the AWS infrastructure including EKS & RDS Multi-AZ (~10-15 minutes)
 terraform apply
+```
 
-# 4. Configure kubectl to point to the new EKS cluster
+This provisions:
+- EKS cluster (`taskmanager-cluster`) with 2× `t3.small` worker nodes
+- AWS RDS PostgreSQL 15 (`db.t4g.micro`)
+- VPC with public/private subnets across 2 AZs
+- CloudWatch Dashboard + Metric Alarms
+
+### 2. Configure kubectl
+
+```bash
 aws eks update-kubeconfig --region us-east-1 --name taskmanager-cluster
+```
 
-# 5. Bootstrap ArgoCD on EKS (same as local setup)
+### 3. Update RDS Endpoint in postgres-service.yaml
+
+After `terraform apply`, update the `externalName` in [k8s/postgres-service.yaml](k8s/postgres-service.yaml) with the actual RDS endpoint:
+
+```bash
+# Get the RDS address
+terraform output rds_address
+
+# Or patch it directly
+terraform output rds_k8s_external_service_command | bash
+```
+
+### 4. Update k8s/secret.yaml with RDS Credentials
+
+Encode your RDS credentials in base64 and update [k8s/secret.yaml](k8s/secret.yaml):
+
+```bash
+# Example
+echo -n "postgres://postgres:<PASSWORD>@<RDS_HOST>:5432/taskdb?sslmode=require" | base64
+```
+
+### 5. Initialize the Database Schema
+
+Run a one-off pod to create the `tasks` table and `web_anon` role on RDS:
+
+```bash
+kubectl run rds-init -n taskmanager --image=postgres:15-alpine --rm -i --restart=Never -- \
+  psql "postgres://postgres:<PASSWORD>@<RDS_HOST>:5432/taskdb?sslmode=require" -c "
+    CREATE ROLE web_anon NOLOGIN;
+    GRANT USAGE ON SCHEMA public TO web_anon;
+    CREATE TABLE IF NOT EXISTS tasks (
+      id SERIAL PRIMARY KEY,
+      title VARCHAR(255) NOT NULL,
+      description TEXT,
+      status VARCHAR(50) NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    GRANT ALL ON TABLE tasks TO web_anon;
+    GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO web_anon;"
+```
+
+### 6. Bootstrap ArgoCD (GitOps)
+
+```bash
 kubectl apply -f k8s/argocd-namespace.yaml
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.11.3/manifests/install.yaml
 kubectl wait --for=condition=available deployment/argocd-server -n argocd --timeout=120s
 kubectl apply -f k8s/argocd-app.yaml
-
-# 6. (Optional) Route in-cluster postgres-svc to AWS RDS with zero application code changes:
-#    Patch the postgres-svc Service to ExternalName:
-RDS_ENDPOINT=$(terraform output -raw rds_address)
-kubectl patch svc postgres-svc -n taskmanager \
-  -p "{\"spec\":{\"type\":\"ExternalName\",\"externalName\":\"$RDS_ENDPOINT\"}}"
-
-# 7. ArgoCD syncs your application from GitHub automatically ✅
 ```
 
+Get the admin password:
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+```
 
-### Tear Down
+Access the ArgoCD UI:
+```bash
+kubectl port-forward svc/argocd-server 8080:443 -n argocd
+# Open https://localhost:8080 (user: admin)
+```
 
-> [!WARNING]
-> Running `terraform destroy` will delete all AWS resources and is irreversible.
+### 7. Push Changes to GitHub to Sync
+
+Any changes committed and pushed to the `k8s/` directory on the `main` branch will be **automatically synced** by ArgoCD within ~3 minutes.
+
+## Accessing the Application
+
+### Frontend Web UI (LoadBalancer)
+
+```bash
+kubectl get svc frontend-svc -n taskmanager
+# Use the EXTERNAL-IP / hostname once AWS provisions the Load Balancer (~2 min)
+```
+
+Open `http://<EXTERNAL-IP>` in your browser.
+
+### Port-Forward (Development)
+
+```bash
+# Frontend
+kubectl port-forward svc/frontend-svc 8080:80 -n taskmanager
+# Open http://localhost:8080
+
+# Backend REST API
+kubectl port-forward svc/backend-svc 3000:3000 -n taskmanager
+# Open http://localhost:3000/tasks
+```
+
+## Key Design Decisions
+
+| Decision | Rationale |
+|---|---|
+| **PostgREST as Backend** | Auto-generates a full REST API from PostgreSQL schema — zero backend code to maintain |
+| **AWS RDS (not in-cluster Postgres)** | Managed, automated backups, Multi-AZ failover capability, separate lifecycle from EKS |
+| **ExternalName Service for RDS** | Backend pods connect via `postgres-svc:5432` — no hardcoded DNS, easy to swap |
+| **Native K8s Ingress (no Istio)** | Eliminates sidecar overhead (~100–150 MB RAM/CPU per pod), removes webhook deadlock risk |
+| **ArgoCD GitOps** | Git is the single source of truth; all changes are auditable, rollback is a `git revert` |
+| **`sslmode=require` in DB URI** | AWS RDS enforces TLS by default; this ensures encrypted connections from PostgREST |
+| **`t3.small` nodes** | Sufficient for dev/demo; easily upgraded via `var.node_instance_type` |
+
+## CloudWatch Observability
+
+After deployment, a **CloudWatch Dashboard** is automatically provisioned at:
+
+```bash
+terraform output cloudwatch_dashboard_url
+```
+
+The dashboard shows:
+- **PostgREST API request rate** (Prometheus metrics from `/metrics`)
+- **RDS CPU Utilization + DB Connections**
+- **EKS Pod CPU & Memory** (Container Insights)
+
+**Metric Alarms** are configured for:
+- RDS CPU > 80% for 5 minutes
+- RDS Free Storage < 2 GB
+
+## Teardown
 
 ```bash
 cd terraform
 terraform destroy
 ```
 
----
+> [!NOTE]
+> If the destroy fails on VPC deletion (due to lingering ENIs from the LoadBalancer service), delete the Kubernetes LoadBalancer service first: `kubectl delete svc frontend-svc -n taskmanager`, wait ~60s, then re-run `terraform destroy`.
 
-## API Endpoints
+## Repository
 
-PostgREST automatically generates a full REST API from the PostgreSQL schema. All endpoints are accessible under the `/api/` prefix.
-
-### List All Tasks
-
-```bash
-curl http://localhost:8080/api/tasks
-```
-
-### Filter Tasks by Status
-
-```bash
-curl "http://localhost:8080/api/tasks?status=eq.pending"
-```
-
-### Create a Task
-
-```bash
-curl -X POST http://localhost:8080/api/tasks \
-  -H "Content-Type: application/json" \
-  -H "Prefer: return=representation" \
-  -d '{"title": "Learn Kubernetes", "description": "Complete the K8s task manager project", "status": "pending"}'
-```
-
-### Update a Task
-
-```bash
-curl -X PATCH "http://localhost:8080/api/tasks?id=eq.1" \
-  -H "Content-Type: application/json" \
-  -H "Prefer: return=representation" \
-  -d '{"status": "completed"}'
-```
-
-### Delete a Task
-
-```bash
-curl -X DELETE "http://localhost:8080/api/tasks?id=eq.1"
-```
-
-> [!IMPORTANT]
-> The PostgREST API supports the full range of [PostgREST query syntax](https://postgrest.org/en/stable/references/api.html), including filtering, ordering, pagination, and bulk operations out of the box.
-
----
-
-## Kubernetes Resources
-
-| #  | Type         | Name                  | Purpose                                      |
-| -- | ------------ | --------------------- | -------------------------------------------- |
-| 1  | Namespace    | `taskmanager`          | Isolates all project resources                |
-| 2  | Secret       | `db-secret`            | Stores database credentials (base64-encoded)  |
-| 3  | ConfigMap    | `app-config`           | PostgREST and application configuration       |
-| 4  | ConfigMap    | `db-init-config`       | SQL init script for schema & seed data        |
-| 5  | ConfigMap    | `frontend-config`      | Nginx reverse-proxy configuration             |
-| 6  | StatefulSet  | `postgres`             | PostgreSQL 15 with health probes & dynamic PVC|
-| 7  | Service      | `postgres-svc`         | Internal ClusterIP for database access        |
-| 8  | Deployment   | `backend`              | PostgREST auto-generated REST API             |
-| 9  | Service      | `backend-svc`          | Internal ClusterIP for API access             |
-| 10 | Deployment   | `frontend`             | Nginx serving UI + reverse proxy              |
-| 11 | Service      | `frontend-svc`         | Internal ClusterIP for frontend access        |
-| 12 | Ingress      | `taskmanager-ingress`  | Path-based routing (`/` → UI, `/api` → API)  |
-
----
-
-## Cleanup
-
-Remove all resources by deleting the namespace:
-
-```bash
-kubectl delete namespace taskmanager
-```
-
-Or use the deploy script:
-
-```bash
-# Remove app resources only (keeps the cluster)
-bash deploy.sh --cleanup
-
-# Delete the entire kind cluster
-bash deploy.sh --destroy
-# or
-kind delete cluster --name taskmanager
-```
-
----
-
-## Skills Demonstrated
-
-- **3-Tier Microservices Architecture** — Frontend, Backend API, and Database as independently deployable units
-- **Kubernetes Orchestration** — Deployments, Services, Ingress, and Namespaces
-- **Configuration Management** — Externalized config via ConfigMaps and Secrets
-- **Persistent Storage** — PersistentVolumeClaims for stateful database workloads
-- **Service Discovery & Internal Networking** — DNS-based inter-service communication
-- **Ingress & Path-based Routing** — Single entry point with intelligent request routing
-- **Health Probes (Liveness / Readiness)** — Automated pod health management
-- **Resource Management** — CPU and memory requests/limits for every container
-- **Infrastructure as Code** — Entire stack defined as declarative YAML manifests
-- **12-Factor App Principles** — Config in environment, stateless processes, port binding
-- **GitOps (ArgoCD)** — Git as the single source of truth; automated sync, self-healing, and drift detection
-- **Cloud Infrastructure (Terraform + AWS EKS)** — Production-grade cluster on AWS with VPC, managed node groups, and IRSA
-- **Service Mesh (Istio)** — Zero-trust mTLS encryption, L7 traffic management, retry/timeout resilience, and DestinationRule circuit breaking
-- **Cloud Observability (AWS CloudWatch + Prometheus)** — Container Insights, Embedded Metric Format (EMF) log stream ingestion, unified dashboards, and metric alarms
-- **AWS Cost Optimization** — EC2 Spot instance capacity, single-AZ DB option, and right-sized compute nodes for non-prod savings (~70% savings)
-
----
-
-## Service Mesh & Observability
-
-### Istio Service Mesh (PROD / AWS EKS)
-
-The project incorporates **Istio Service Mesh** installed declaratively via Terraform Helm releases (`istio-base`, `istiod`, `istio-ingressgateway`):
-
-- **Zero-Trust Security**: `PeerAuthentication` enforces `STRICT` mutual TLS (mTLS) across all pods in `taskmanager`.
-- **Fine-Grained Authorization**: `AuthorizationPolicy` resources restrict network traffic using SPIFFE identities (`frontend-sa`, `backend-sa`, `postgres-sa`). Only `backend-sa` is authorized to access `postgres-svc:5432`.
-- **Traffic Management**: Istio `Gateway` & `VirtualService` handle path-based routing (`/` → frontend, `/api` → backend with `/api` prefix stripping), 3x retry policies, and per-route timeouts.
-- **Circuit Breaking**: `DestinationRule` resources configure connection pool limits and 5xx error outlier detection for fault tolerance.
-
-### AWS CloudWatch Observability (Pattern 1)
-
-Monitoring is powered by the **Amazon CloudWatch Observability EKS Add-on**:
-
-- **Prometheus Metric Ingestion**: Scrapes `/metrics` from annotated pods (`prometheus.io/scrape: "true"`) and streams metrics as Embedded Metric Format (EMF) logs to `/aws/containerinsights/taskmanager-cluster/prometheus`.
-- **Unified CloudWatch Dashboard**: Realtime 6-widget dashboard displaying PostgREST API request rates, Istio Ingress request volume, EKS pod CPU/memory utilization, and RDS PostgreSQL performance.
-- **CloudWatch Metric Alarms**: Automated alerts for RDS High CPU (>80%), Low Storage (<5GB), Backend 5xx HTTP Errors, and Pod Memory Saturation (>85%).
-
-
----
-
-## License
-
-This project is open source and available under the [MIT License](LICENSE).
+**GitHub**: [https://github.com/AdastraGupta/3-tier-k8s-project](https://github.com/AdastraGupta/3-tier-k8s-project)

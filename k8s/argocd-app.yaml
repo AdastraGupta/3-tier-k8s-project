@@ -12,17 +12,15 @@ spec:
   project: default
 
   # ─── Source ─────────────────────────────────────────────────────────────────
-  # ArgoCD watches this Git repo path for changes to sync
+  # ArgoCD watches this Git repo path for changes and auto-syncs
   source:
     repoURL: https://github.com/AdastraGupta/3-tier-k8s-project.git
     targetRevision: main
     path: k8s
-    # Exclude ArgoCD's own manifests to avoid ArgoCD managing itself from here
     directory:
-      exclude: "argocd-*.yaml"
+      exclude: "argocd-*.yaml"   # Prevent ArgoCD from managing its own manifests
 
   # ─── Destination ────────────────────────────────────────────────────────────
-  # Deploy everything into the taskmanager namespace on the local cluster
   destination:
     server: https://kubernetes.default.svc
     namespace: taskmanager
@@ -30,43 +28,15 @@ spec:
   # ─── Sync Policy ────────────────────────────────────────────────────────────
   syncPolicy:
     automated:
-      # Automatically sync when Git changes are detected
       selfHeal: true    # Revert any manual kubectl changes to match Git
       prune: true       # Delete resources that are removed from Git
     syncOptions:
-      - CreateNamespace=true      # Auto-create taskmanager namespace if missing
+      - CreateNamespace=true
       - PrunePropagationPolicy=foreground
-      - PruneLast=true            # Prune only after all other syncs succeed
+      - PruneLast=true
     retry:
       limit: 5
       backoff:
         duration: 5s
         factor: 2
         maxDuration: 3m
-
-  # ─── Ignore Differences ─────────────────────────────────────────────────────
-  # Istio's mutating admission webhook injects the istio-proxy sidecar and
-  # istio-init init container into pods at admission time. These containers exist
-  # in the live cluster state but are NOT present in the Git manifests.
-  # Without this section ArgoCD would perpetually report the app as OutOfSync.
-  ignoreDifferences:
-    # Deployments — sidecar and init container injection
-    - group: apps
-      kind: Deployment
-      jsonPointers:
-        - /spec/template/spec/containers
-        - /spec/template/spec/initContainers
-        - /spec/template/metadata/annotations
-    # StatefulSets (postgres) — same injection occurs
-    - group: apps
-      kind: StatefulSet
-      jsonPointers:
-        - /spec/template/spec/containers
-        - /spec/template/spec/initContainers
-        - /spec/template/metadata/annotations
-    # Services — Istio may add traffic.sidecar annotations
-    - group: ""
-      kind: Service
-      jsonPointers:
-        - /metadata/annotations
-

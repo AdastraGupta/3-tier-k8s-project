@@ -98,29 +98,3 @@ output "cloudwatch_dashboard_url" {
   description = "Direct AWS Console URL to open the CloudWatch Dashboard after terraform apply."
   value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${aws_cloudwatch_dashboard.taskmanager.dashboard_name}"
 }
-
-output "cloudwatch_verification_commands" {
-  description = "Commands to verify CloudWatch Observability is working after terraform apply."
-  value       = <<-EOT
-    # 1. Verify CloudWatch Agent DaemonSet is running on all nodes:
-    kubectl get pods -n amazon-cloudwatch -l app.kubernetes.io/name=cloudwatch-agent
-
-    # 2. Check CloudWatch Agent logs for Prometheus scraping activity:
-    kubectl logs -n amazon-cloudwatch daemonset/cloudwatch-agent -c cloudwatch-agent --tail=50
-
-    # 3. Verify backend pod has Prometheus annotations applied:
-    kubectl get pod -n taskmanager -l tier=backend -o jsonpath='{.items[0].metadata.annotations}'
-
-    # 4. Check the CloudWatch Log Group for EMF Prometheus metrics:
-    aws logs describe-log-streams \
-      --log-group-name /aws/containerinsights/${var.cluster_name}/prometheus \
-      --region ${var.aws_region}
-
-    # 5. List CloudWatch Alarms and their current state:
-    aws cloudwatch describe-alarms \
-      --alarm-name-prefix ${var.cluster_name} \
-      --region ${var.aws_region} \
-      --query 'MetricAlarms[].{Name:AlarmName,State:StateValue}' \
-      --output table
-  EOT
-}

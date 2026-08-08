@@ -24,7 +24,7 @@ spec:
         prometheus.io/port: "3000"
         prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: backend-sa  # Istio SPIFFE identity: cluster.local/ns/taskmanager/sa/backend-sa
+      serviceAccountName: backend-sa
       containers:
         - name: postgrest
           image: postgrest/postgrest:v12.2.3
