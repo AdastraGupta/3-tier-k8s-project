@@ -4,69 +4,97 @@ A production-grade, cloud-native **3-tier task manager** application deployed on
 
 ## Architecture
 
-```
-                              ┌─────────────────────────────────────────────┐
-                              │            GitHub Repository                │
-                              │   AdastraGupta/3-tier-k8s-project (main)    │
-                              │                                             │
-                              │   k8s/          terraform/                  │
-                              └──────────────────┬──────────────────────────┘
-                                                 │ Git push triggers sync
-                                                 │
-                              ┌──────────────────▼──────────────────────────┐
-                              │          ArgoCD (argocd namespace)          │
-                              │  Watches k8s/ → auto-applies to cluster     │
-                              └──────────────────┬──────────────────────────┘
-                                                 │ kubectl apply
-                                                 │
-┌──────────────────────────────AWS Region: us-east-1──────────────────────────────────────┐
-│                                                                                         │
-│  ┌─────────────────────────────────VPC (10.0.0.0/16)────────────────────────────────┐  │
-│  │                                                                                   │  │
-│  │  ┌──────Public Subnets──────┐        ┌────────────Private Subnets──────────────┐ │  │
-│  │  │  us-east-1a  us-east-1b  │        │  us-east-1a              us-east-1b     │ │  │
-│  │  │                          │        │                                          │ │  │
-│  │  │   AWS Load Balancer ◄────┼────────┼── frontend-svc (type: LoadBalancer)     │ │  │
-│  │  │       (port 80)          │        │                     │                   │ │  │
-│  │  └────────────┬─────────────┘        │   ┌────────────────▼──────────────────┐ │ │  │
-│  │               │ Internet traffic     │   │      EKS Managed Node Group        │ │  │
-│  │               │                     │   │      (2× t3.small EC2 nodes)        │ │  │
-│  │               ▼                     │   │                                     │ │  │
-│  │      ┌────────────────────────────────────────────────────────────────────┐   │ │  │
-│  │      │                   taskmanager Namespace                            │   │ │  │
-│  │      │                                                                    │   │ │  │
-│  │      │   ┌──────────────────────────┐   ┌──────────────────────────────┐ │   │ │  │
-│  │      │   │     Frontend Pods        │   │      Backend Pods            │ │   │ │  │
-│  │      │   │   Nginx (HTML/CSS/JS)    │   │  PostgREST v12.2.3 (REST)   │ │   │ │  │
-│  │      │   │      3 replicas          │   │      2 replicas              │ │   │ │  │
-│  │      │   │  port: 80               │   │  port: 3000  /metrics        │ │   │ │  │
-│  │      │   └──────────────────────────┘   └──────────────┬───────────────┘ │   │ │  │
-│  │      │                                                  │                │   │ │  │
-│  │      │          backend-svc (ClusterIP :3000)◄──────────┘                │   │ │  │
-│  │      │                                                  │                │   │ │  │
-│  │      │          postgres-svc (ExternalName) ────────────┘                │   │ │  │
-│  │      │                                                  │                │   │ │  │
-│  │      │   ┌──────────────┐  ┌──────────┐  ┌──────────┐  │  ┌──────────┐  │   │ │  │
-│  │      │   │  configmap   │  │  secret  │  │ namespace│  │  │ ingress  │  │   │ │  │
-│  │      │   │  (PGRST cfg) │  │ (DB creds│  │          │  │  │  (nginx) │  │   │ │  │
-│  │      │   └──────────────┘  └──────────┘  └──────────┘  │  └──────────┘  │   │ │  │
-│  │      └─────────────────────────────────────────────────────────────────────┘   │ │  │
-│  │                                                          │                     │ │  │
-│  │                         ┌───────────────────────────────▼──────────────────┐   │ │  │
-│  │                         │      AWS RDS PostgreSQL 15 (db.t4g.micro)        │   │ │  │
-│  │                         │   taskmanager-cluster-postgres.<region>.rds...   │   │ │  │
-│  │                         │   port: 5432 | sslmode=require | DB: taskdb      │   │ │  │
-│  │                         └──────────────────────────────────────────────────┘   │ │  │
-│  │                                                                                 │ │  │
-│  └─────────────────────────────────────────────────────────────────────────────────┘ │  │
-│                                                                                       │  │
-│  ┌────────────────────────────────────────────────────────────────────────────────┐   │  │
-│  │                         AWS CloudWatch                                         │   │  │
-│  │  Log Groups: /prometheus  /performance  │  Dashboard: taskmanager-observability │   │  │
-│  │  Alarms: RDS CPU > 80%   RDS Storage < 2GB                                     │   │  │
-│  └────────────────────────────────────────────────────────────────────────────────┘   │  │
-│                                                                                        │  │
-└────────────────────────────────────────────────────────────────────────────────────────┘  │
+```mermaid
+graph TB
+    User["🌐 User / Browser"]
+    GitHub["📦 GitHub Repository\n(AdastraGupta/3-tier-k8s-project · main)"]
+
+    subgraph "AWS Cloud — us-east-1"
+        ELB["☁️ AWS Elastic Load Balancer\n(frontend-svc · port 80)"]
+
+        subgraph "Amazon EKS Cluster (v1.30 · 2× t3.small)"
+            subgraph "argocd Namespace"
+                ArgoCD["🔄 ArgoCD Server\n(GitOps Controller · v2.11.3)"]
+            end
+
+            subgraph "taskmanager Namespace"
+                subgraph "Ingress Layer"
+                    ING["nginx Ingress Controller\n(path-based routing)"]
+                end
+
+                subgraph "Frontend Tier"
+                    FD["Frontend Pod\n(nginx:alpine)\n3 replicas · port 80"]
+                    FS["frontend-svc\n(LoadBalancer :80)"]
+                end
+
+                subgraph "Backend Tier"
+                    BD["Backend Pod\n(postgrest/postgrest:v12.2.3)\n2 replicas · port 3000"]
+                    BS["backend-svc\n(ClusterIP :3000)"]
+                end
+
+                subgraph "Database Layer"
+                    PS["postgres-svc\n(ExternalName → RDS)"]
+                end
+
+                CM["ConfigMap + Secret\n(PGRST config · DB credentials)"]
+            end
+
+            subgraph "amazon-cloudwatch Namespace"
+                CWAgent["CloudWatch Agent DaemonSet\n(Prometheus Scraper)"]
+            end
+        end
+
+        subgraph "AWS Managed Services"
+            RDS["🗄️ AWS RDS PostgreSQL 15\n(db.t4g.micro · Single-AZ)\nDB: taskdb · port 5432 · sslmode=require"]
+            CWLogs["CloudWatch Logs\n(/aws/containerinsights/prometheus)\n(/aws/containerinsights/performance)"]
+            CWDash["CloudWatch Dashboard & Alarms\n(taskmanager-cluster-observability)\nAlarms: RDS CPU > 80% · Storage < 2 GB"]
+        end
+    end
+
+    %% GitOps flow
+    GitHub -->|"git push → auto-sync"| ArgoCD
+    ArgoCD -->|"kubectl apply k8s/"| ING
+    ArgoCD -->|"kubectl apply k8s/"| FS
+    ArgoCD -->|"kubectl apply k8s/"| BS
+
+    %% User traffic path
+    User -->|"HTTP :80"| ELB
+    ELB -->|TCP| FS
+    FS --> FD
+    ING -->|"/ → frontend"| FS
+    ING -->|"/api → backend"| BS
+    BS --> BD
+
+    %% Backend → DB
+    BD -->|"PGRST_DB_URI (TCP :5432)"| PS
+    PS -->|"DNS ExternalName"| RDS
+
+    %% Config injection
+    CM -.->|"env vars"| FD
+    CM -.->|"env vars"| BD
+
+    %% Observability
+    BD -.-|"Prometheus /metrics"| CWAgent
+    FD -.-|"Prometheus /metrics"| CWAgent
+    CWAgent -->|"EMF Logs"| CWLogs
+    CWLogs --> CWDash
+
+    %% Styles
+    style User fill:#4FC3F7,stroke:#0277BD,color:#000
+    style GitHub fill:#24292E,stroke:#586069,color:#fff
+    style ELB fill:#FF9900,stroke:#232F3E,color:#000
+    style ArgoCD fill:#EF7B4D,stroke:#C04A1A,color:#fff
+    style ING fill:#326CE5,stroke:#1A4DB5,color:#fff
+    style FD fill:#66BB6A,stroke:#2E7D32,color:#000
+    style FS fill:#A5D6A7,stroke:#2E7D32,color:#000
+    style BD fill:#FFA726,stroke:#E65100,color:#000
+    style BS fill:#FFCC80,stroke:#E65100,color:#000
+    style PS fill:#CE93D8,stroke:#6A1B9A,color:#000
+    style RDS fill:#EF5350,stroke:#B71C1C,color:#fff
+    style CWAgent fill:#FF9900,stroke:#232F3E,color:#fff
+    style CWLogs fill:#FFE0B2,stroke:#E65100,color:#000
+    style CWDash fill:#FF9900,stroke:#232F3E,color:#000
+    style CM fill:#78909C,stroke:#37474F,color:#fff
 ```
 
 ## Tech Stack
