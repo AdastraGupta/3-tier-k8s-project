@@ -3,8 +3,13 @@ kind: Service
 metadata:
   name: frontend-svc
   namespace: taskmanager
+  labels:
+    app: taskmanager
+    tier: frontend
 spec:
-  type: LoadBalancer
+  # ClusterIP: traffic reaches frontend only via the nginx Ingress Controller.
+  # The Ingress Controller has its own AWS ELB — no need for a second one here.
+  type: ClusterIP
   selector:
     app: taskmanager
     tier: frontend

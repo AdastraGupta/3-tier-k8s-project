@@ -10,7 +10,7 @@ graph TB
     GitHub["📦 GitHub Repository\n(AdastraGupta/3-tier-k8s-project · main)"]
 
     subgraph "AWS Cloud — us-east-1"
-        ELB["☁️ AWS Elastic Load Balancer\n(frontend-svc · port 80)"]
+        ING_ELB["☁️ AWS Elastic Load Balancer\n(nginx Ingress Controller · port 80)"]
 
         subgraph "Amazon EKS Cluster (v1.30 · 2× t3.small)"
             subgraph "argocd Namespace"
@@ -24,7 +24,7 @@ graph TB
 
                 subgraph "Frontend Tier"
                     FD["Frontend Pod\n(nginx:alpine)\n3 replicas · port 80"]
-                    FS["frontend-svc\n(LoadBalancer :80)"]
+                    FS["frontend-svc\n(ClusterIP :80)"]
                 end
 
                 subgraph "Backend Tier"
@@ -57,15 +57,12 @@ graph TB
     ArgoCD -->|"kubectl apply k8s/"| FS
     ArgoCD -->|"kubectl apply k8s/"| BS
 
-    %% User traffic path — TWO parallel entry points:
-    %% 1. frontend-svc LoadBalancer → direct to frontend pods
-    %% 2. nginx Ingress Controller → path-based routing to frontend/backend
-    User -->|"HTTP :80 (direct)"| ELB
-    ELB -->|TCP| FS
-    FS --> FD
-    User -->|"HTTP :80 (path-based)"| ING
+    %% User traffic — single entry point via nginx Ingress Controller ELB
+    User -->|"HTTP :80"| ING_ELB
+    ING_ELB -->|TCP| ING
     ING -->|"/ → frontend"| FS
     ING -->|"/api → backend"| BS
+    FS --> FD
     BS --> BD
 
     %% Backend → DB
@@ -84,7 +81,7 @@ graph TB
     %% Styles
     style User fill:#4FC3F7,stroke:#0277BD,color:#000
     style GitHub fill:#24292E,stroke:#586069,color:#fff
-    style ELB fill:#FF9900,stroke:#232F3E,color:#000
+    style ING_ELB fill:#FF9900,stroke:#232F3E,color:#000
     style ArgoCD fill:#EF7B4D,stroke:#C04A1A,color:#fff
     style ING fill:#326CE5,stroke:#1A4DB5,color:#fff
     style FD fill:#66BB6A,stroke:#2E7D32,color:#000
@@ -110,7 +107,7 @@ graph TB
 | **GitOps** | ArgoCD v2.11.3 — continuous delivery from this GitHub repository |
 | **Observability** | AWS CloudWatch (Dashboard + Metric Alarms) |
 | **Infrastructure as Code** | Terraform |
-| **Networking** | Native Kubernetes Ingress, ClusterIP, LoadBalancer, ExternalName services |
+| **Networking** | Native Kubernetes Ingress (nginx), ClusterIP, ExternalName services |
 
 ## Project Structure
 
@@ -121,7 +118,7 @@ graph TB
 │   ├── configmap.yaml          # PostgREST configuration (schema, anon role)
 │   ├── frontend-configmap.yaml # Frontend HTML/CSS/JS (served via Nginx)
 │   ├── frontend-deployment.yaml
-│   ├── frontend-service.yaml   # type: LoadBalancer — public internet access
+│   ├── frontend-service.yaml   # type: ClusterIP — traffic enters via nginx Ingress only
 │   ├── backend-deployment.yaml # PostgREST deployment
 │   ├── backend-service.yaml    # type: ClusterIP
 │   ├── postgres-service.yaml   # type: ExternalName → AWS RDS endpoint
@@ -236,14 +233,17 @@ Any changes committed and pushed to the `k8s/` directory on the `main` branch wi
 
 ## Accessing the Application
 
-### Frontend Web UI (LoadBalancer)
+### Frontend Web UI (via nginx Ingress)
 
 ```bash
-kubectl get svc frontend-svc -n taskmanager
-# Use the EXTERNAL-IP / hostname once AWS provisions the Load Balancer (~2 min)
+# Get the nginx Ingress Controller's external hostname (single public ELB)
+kubectl get svc -n ingress-nginx ingress-nginx-controller
+# Use the EXTERNAL-IP once AWS provisions the Load Balancer (~2 min)
 ```
 
-Open `http://<EXTERNAL-IP>` in your browser.
+Open `http://<EXTERNAL-IP>/` in your browser.
+
+For the REST API: `http://<EXTERNAL-IP>/api/tasks`
 
 ### Port-Forward (Development)
 
