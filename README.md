@@ -18,6 +18,10 @@ graph TB
             end
 
             subgraph "taskmanager Namespace"
+                direction TB
+                TM_NS["📁 All k8s/ Manifests Applied
+(Namespace · Secrets · ConfigMaps
+Deployments · Services · Ingress)"]
                 subgraph "Ingress Layer"
                     ING["nginx Ingress Controller\n(path-based routing)"]
                 end
@@ -51,11 +55,9 @@ graph TB
         end
     end
 
-    %% GitOps flow
+    %% GitOps flow — ArgoCD syncs entire k8s/ dir to the cluster
     GitHub -->|"git push → auto-sync"| ArgoCD
-    ArgoCD -->|"kubectl apply k8s/"| ING
-    ArgoCD -->|"kubectl apply k8s/"| FS
-    ArgoCD -->|"kubectl apply k8s/"| BS
+    ArgoCD -->|"kubectl apply k8s/ (all manifests)"| TM_NS
 
     %% User traffic — single entry point via nginx Ingress Controller ELB
     User -->|"HTTP :80"| ING_ELB
@@ -83,6 +85,7 @@ graph TB
     style GitHub fill:#24292E,stroke:#586069,color:#fff
     style ING_ELB fill:#FF9900,stroke:#232F3E,color:#000
     style ArgoCD fill:#EF7B4D,stroke:#C04A1A,color:#fff
+    style TM_NS fill:#37474F,stroke:#546E7A,color:#fff
     style ING fill:#326CE5,stroke:#1A4DB5,color:#fff
     style FD fill:#66BB6A,stroke:#2E7D32,color:#000
     style FS fill:#A5D6A7,stroke:#2E7D32,color:#000
