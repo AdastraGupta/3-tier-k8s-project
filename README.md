@@ -57,10 +57,13 @@ graph TB
     ArgoCD -->|"kubectl apply k8s/"| FS
     ArgoCD -->|"kubectl apply k8s/"| BS
 
-    %% User traffic path
-    User -->|"HTTP :80"| ELB
+    %% User traffic path — TWO parallel entry points:
+    %% 1. frontend-svc LoadBalancer → direct to frontend pods
+    %% 2. nginx Ingress Controller → path-based routing to frontend/backend
+    User -->|"HTTP :80 (direct)"| ELB
     ELB -->|TCP| FS
     FS --> FD
+    User -->|"HTTP :80 (path-based)"| ING
     ING -->|"/ → frontend"| FS
     ING -->|"/api → backend"| BS
     BS --> BD
@@ -75,7 +78,6 @@ graph TB
 
     %% Observability
     BD -.-|"Prometheus /metrics"| CWAgent
-    FD -.-|"Prometheus /metrics"| CWAgent
     CWAgent -->|"EMF Logs"| CWLogs
     CWLogs --> CWDash
 
