@@ -83,11 +83,12 @@ graph TB
     ArgoNotif -->|"Sync / Health Alerts (Webhook)"| Teams
     GitHub -.->|"CI/CD Plan / Apply / Destroy Alerts"| Teams
 
-    %% 🌐 PUBLIC TRAFFIC FLOW: User → Public NLB → nginx-public → Frontend/Backend
+    %% 🌐 PUBLIC TRAFFIC FLOW: User → Public NLB → nginx-public Controller → Ingress Rules → Frontend/Backend
     User -->|"HTTP :80 (Public Internet)"| PUB_NLB
     PUB_NLB --> ING_PUB
-    ING_PUB -->|"Path: / (Frontend UI)"| FS
-    ING_PUB -->|"Path: /api (REST API)"| BS
+    ING_PUB --> TM_ING
+    TM_ING -->|"Path: / (Frontend UI)"| FS
+    TM_ING -->|"Path: /api (REST API)"| BS
     FS --> FD
     BS --> BD
 
