@@ -39,16 +39,14 @@ output "kubeconfig_command" {
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
 }
 
-output "argocd_bootstrap_commands" {
-  description = "After kubeconfig is set, run these to bootstrap the GitOps layer."
-  value       = <<-EOT
-    kubectl apply -f k8s/argocd-namespace.yaml
-    kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.11.3/manifests/install.yaml
-    kubectl wait --for=condition=available deployment/argocd-server -n argocd --timeout=120s
-    kubectl apply -f k8s/argocd-notifications.yaml
-    kubectl apply -f k8s/argocd-app.yaml
-    kubectl port-forward svc/argocd-server 8080:443 -n argocd
-  EOT
+output "argocd_admin_password_command" {
+  description = "Retrieve the auto-generated ArgoCD admin password after terraform apply."
+  value       = var.argocd_enabled ? "kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d" : "ArgoCD is disabled (argocd_enabled = false)"
+}
+
+output "argocd_access_info" {
+  description = "Access ArgoCD UI via the internal Ingress at /argocd (requires VPN or port-forward)."
+  value       = var.argocd_enabled ? "kubectl port-forward svc/nginx-internal-ingress-nginx-controller 8080:80 -n ingress-nginx  # then open http://localhost:8080/argocd" : "ArgoCD is disabled (argocd_enabled = false)"
 }
 
 # ─── RDS PostgreSQL ────────────────────────────────────────────────────────────

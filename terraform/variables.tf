@@ -146,3 +146,11 @@ variable "teams_webhook_url" {
   default     = ""
 }
 
+# ─── ArgoCD GitOps Controller ─────────────────────────────────────────────────
+
+variable "argocd_enabled" {
+  description = "Enable ArgoCD GitOps controller via Helm (argo/argo-cd chart). Set false to skip during initial bootstrap."
+  type        = bool
+  default     = true
+}
+

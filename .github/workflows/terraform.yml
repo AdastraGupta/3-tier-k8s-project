@@ -72,6 +72,11 @@ on:
         required: false
         type: boolean
         default: true
+      argocd_enabled:
+        description: "Deploy ArgoCD GitOps controller via Helm?"
+        required: false
+        type: boolean
+        default: true
 
 # ── Concurrency: prevent parallel runs on the same branch ──────────────────
 concurrency:
@@ -202,6 +207,7 @@ jobs:
             -var="environment=${{ github.event.inputs.environment || 'dev' }}" \
             -var="efk_enabled=${{ github.event.inputs.efk_enabled || 'true' }}" \
             -var="monitoring_enabled=${{ github.event.inputs.monitoring_enabled || 'true' }}" \
+            -var="argocd_enabled=${{ github.event.inputs.argocd_enabled || 'true' }}" \
             -detailed-exitcode \
             -no-color \
             -out=tfplan \
@@ -620,6 +626,7 @@ jobs:
             -var="environment=${{ github.event.inputs.environment || 'dev' }}" \
             -var="efk_enabled=${{ github.event.inputs.efk_enabled || 'true' }}" \
             -var="monitoring_enabled=${{ github.event.inputs.monitoring_enabled || 'true' }}" \
+            -var="argocd_enabled=${{ github.event.inputs.argocd_enabled || 'true' }}" \
             -auto-approve \
             -no-color
         working-directory: ${{ env.TF_WORKING_DIR }}

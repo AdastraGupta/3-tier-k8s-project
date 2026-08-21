@@ -171,14 +171,14 @@ graph TB
 | **Frontend** | Nginx serving static HTML/CSS/JS |
 | **Backend API** | [PostgREST](https://postgrest.org/) v12.2.3 — auto-generates REST API from PostgreSQL schema |
 | **Database** | AWS RDS PostgreSQL 15 (`db.t4g.micro`, Single-AZ) |
-| **GitOps** | ArgoCD v2.11.3 — continuous delivery from this GitHub repository |
+| **GitOps** | ArgoCD v2.12 — Helm-managed, fully automated via `terraform apply` |
 | **CI/CD** | GitHub Actions — Terraform plan/apply pipeline with OIDC authentication |
+| **Ingress** | Dual Nginx Ingress Controllers — `nginx-public` (internet) + `nginx-internal` (VPC-only) |
 | **Metrics & Monitoring** | Prometheus 2.53 + Grafana 11.1 via `kube-prometheus-stack` (Helm-managed) |
 | **Alerting** | Alertmanager (MS Teams webhook routing) + AWS CloudWatch Alarms |
 | **Observability (AWS)** | AWS CloudWatch (Dashboard + Container Insights + Metric Alarms) |
 | **Centralized Logging** | EFK Stack — Elasticsearch 8.15, Fluent Bit 3.1, Kibana 8.15 (Helm-managed via Terraform) |
 | **Infrastructure as Code** | Terraform (S3 backend + DynamoDB state locking) |
-| **Networking** | Native Kubernetes Ingress (nginx), ClusterIP, ExternalName services |
 
 ## Project Structure
 
@@ -193,21 +193,21 @@ graph TB
 │   ├── backend-deployment.yaml       # PostgREST deployment
 │   ├── backend-service.yaml          # type: ClusterIP
 │   ├── postgres-service.yaml         # type: ExternalName → AWS RDS endpoint
-│   ├── ingress.yaml                  # Path-based routing (/ → frontend, /api → backend)
-│   ├── argocd-namespace.yaml         # ArgoCD namespace
-│   ├── argocd-notifications.yaml     # MS Teams webhook templates & triggers
-│   └── argocd-app.yaml               # ArgoCD Application manifest (taskmanager)
+│   ├── ingress.yaml                  # Public Ingress (nginx-public: / → frontend, /api → backend)
+│   └── ingress-internal.yaml         # Internal Ingress (nginx-internal: /grafana, /kibana, /argocd)
 │
 └── terraform/                        # Infrastructure as Code
     ├── provider.tf                   # AWS + Kubernetes + Helm + Random provider config
-    ├── variables.tf                  # All configurable inputs (incl. EFK & Monitoring vars)
+    ├── variables.tf                  # All configurable inputs (EFK, Monitoring, ArgoCD vars)
     ├── vpc.tf                        # VPC, public/private subnets, NAT Gateway
     ├── eks.tf                        # EKS cluster + managed node group + EBS CSI
     ├── rds.tf                        # RDS PostgreSQL instance + subnet/security groups
     ├── cloudwatch.tf                 # CloudWatch Log Groups, Dashboard, Metric Alarms
+    ├── ingress.tf                    # Dual Nginx Ingress Controllers (nginx-public + nginx-internal)
     ├── efk.tf                        # EFK logging stack (Helm: ES + Fluent Bit + Kibana)
     ├── monitoring.tf                 # Prometheus + Grafana stack (Helm: kube-prometheus-stack)
-    └── outputs.tf                    # Key outputs (endpoints, commands, EFK, Grafana)
+    ├── argocd.tf                     # ArgoCD GitOps controller (Helm: argo/argo-cd)
+    └── outputs.tf                    # Key outputs (endpoints, commands, passwords)
 ├── .github/
 │   └── workflows/
 │       └── terraform.yml             # CI/CD: plan on PR, auto-apply on push to main
