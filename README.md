@@ -26,11 +26,6 @@ graph TB
                 INT_ING_RES["ingress-internal.yaml\n(ExternalName proxies)"]
             end
 
-            subgraph "argocd Namespace (Helm: argo/argo-cd)"
-                ArgoCD["🔄 ArgoCD Server\n(GitOps Controller v2.12 · ClusterIP)\nSubpath: /argocd"]
-                ArgoNotif["🔔 ArgoCD Notifications\n(MS Teams webhook triggers)"]
-            end
-
             subgraph "taskmanager Namespace (Application Tier)"
                 direction TB
                 TM_ING["ingress.yaml\n(nginx-public: / and /api→rewrite→/)"]
@@ -54,6 +49,11 @@ graph TB
                 ALERT["🚨 Alertmanager 0.27\n(Deployment · 5Gi EBS gp3)"]
                 NE["node-exporter\n(DaemonSet · Host Telemetry)"]
                 KSM["kube-state-metrics\n(Deployment · K8s Objects)"]
+            end
+
+            subgraph "argocd Namespace (Helm: argo/argo-cd)"
+                ArgoCD["🔄 ArgoCD Server\n(GitOps Controller v2.12 · ClusterIP)\nSubpath: /argocd"]
+                ArgoNotif["🔔 ArgoCD Notifications\n(MS Teams webhook triggers)"]
             end
 
             subgraph "amazon-cloudwatch Namespace"
