@@ -67,6 +67,11 @@ on:
         required: false
         type: boolean
         default: true
+      monitoring_enabled:
+        description: "Deploy Prometheus + Grafana monitoring stack?"
+        required: false
+        type: boolean
+        default: true
 
 # ── Concurrency: prevent parallel runs on the same branch ──────────────────
 concurrency:
@@ -196,6 +201,7 @@ jobs:
           terraform plan \
             -var="environment=${{ github.event.inputs.environment || 'dev' }}" \
             -var="efk_enabled=${{ github.event.inputs.efk_enabled || 'true' }}" \
+            -var="monitoring_enabled=${{ github.event.inputs.monitoring_enabled || 'true' }}" \
             -detailed-exitcode \
             -no-color \
             -out=tfplan \
@@ -204,6 +210,7 @@ jobs:
         continue-on-error: true
         env:
           TF_VAR_db_password: ${{ secrets.TF_VAR_db_password }}
+          TF_VAR_teams_webhook_url: ${{ secrets.TEAMS_WEBHOOK_URL }}
 
       # ── Generate plan summary ──────────────────────────────────────────────
       - name: Generate plan summary
@@ -438,6 +445,7 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         env:
           TF_VAR_db_password: ${{ secrets.TF_VAR_db_password }}
+          TF_VAR_teams_webhook_url: ${{ secrets.TEAMS_WEBHOOK_URL }}
 
       # ── Capture outputs for downstream use ──────────────────────────────────
       - name: Capture Terraform outputs
@@ -595,6 +603,7 @@ jobs:
         run: |
           echo "⚠️ Cleaning up LoadBalancer services to release ENIs before VPC destroy..."
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name taskmanager-cluster || true
+          kubectl delete svc kube-prometheus-stack-grafana -n monitoring --ignore-not-found=true || true
           kubectl delete svc kibana-kibana -n logging --ignore-not-found=true || true
           kubectl delete svc frontend-svc -n taskmanager --ignore-not-found=true || true
           echo "Waiting 60s for ENIs to detach..."
@@ -609,11 +618,13 @@ jobs:
           terraform destroy \
             -var="environment=${{ github.event.inputs.environment || 'dev' }}" \
             -var="efk_enabled=${{ github.event.inputs.efk_enabled || 'true' }}" \
+            -var="monitoring_enabled=${{ github.event.inputs.monitoring_enabled || 'true' }}" \
             -auto-approve \
             -no-color
         working-directory: ${{ env.TF_WORKING_DIR }}
         env:
           TF_VAR_db_password: ${{ secrets.TF_VAR_db_password }}
+          TF_VAR_teams_webhook_url: ${{ secrets.TEAMS_WEBHOOK_URL }}
 
       # ── Send MS Teams Notification (Destroy) ───────────────────────────────
       - name: Send MS Teams Notification (Destroy)

@@ -30,15 +30,15 @@ resource "kubernetes_namespace" "logging" {
 
 # ── EBS gp3 StorageClass ─────────────────────────────────────────────────────
 # gp3 is 20% cheaper than gp2 with better baseline throughput (125 MiB/s).
-# Required by the Elasticsearch StatefulSet for persistent log storage.
+# Used by Elasticsearch and Prometheus for persistent volume claims.
 # Needs the EBS CSI Driver add-on (configured in eks.tf).
 resource "kubernetes_storage_class" "gp3" {
-  count = var.efk_enabled ? 1 : 0
+  count = (var.efk_enabled || var.monitoring_enabled) ? 1 : 0
 
   metadata {
     name = "gp3"
     labels = {
-      component = "efk"
+      purpose = "observability-storage"
     }
   }
 

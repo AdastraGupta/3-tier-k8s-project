@@ -125,3 +125,24 @@ variable "db_password" {
   default     = "postgres123"
 }
 
+# ─── Prometheus + Grafana Monitoring Stack ────────────────────────────────────
+
+variable "monitoring_enabled" {
+  description = "Enable the Prometheus + Grafana monitoring stack via Helm (kube-prometheus-stack)."
+  type        = bool
+  default     = true
+}
+
+variable "monitoring_prometheus_volume_size" {
+  description = "Size of the EBS gp3 PersistentVolume for Prometheus metrics storage (in Gi)."
+  type        = number
+  default     = 10
+}
+
+variable "teams_webhook_url" {
+  description = "Microsoft Teams incoming webhook URL for Alertmanager and CI/CD alerts."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+

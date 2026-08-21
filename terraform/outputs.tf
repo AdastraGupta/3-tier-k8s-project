@@ -121,3 +121,26 @@ output "efk_helm_releases" {
   description = "Helm releases deployed for the EFK logging stack."
   value       = var.efk_enabled ? "helm list -n logging" : "EFK stack is disabled (efk_enabled = false)"
 }
+
+# ─── Prometheus + Grafana Monitoring (Helm) ───────────────────────────────────
+
+output "grafana_access_command" {
+  description = "Command to get the Grafana LoadBalancer URL. Wait ~2 minutes for AWS to provision the NLB."
+  value       = var.monitoring_enabled ? "kubectl get svc kube-prometheus-stack-grafana -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'" : "Monitoring stack is disabled (monitoring_enabled = false)"
+}
+
+output "grafana_admin_password" {
+  description = "Auto-generated secure admin password for Grafana. Retrieve with: terraform output -raw grafana_admin_password"
+  value       = var.monitoring_enabled ? random_password.grafana_admin[0].result : "N/A"
+  sensitive   = true
+}
+
+output "monitoring_status_command" {
+  description = "Command to check the health of all Prometheus + Grafana monitoring pods."
+  value       = var.monitoring_enabled ? "kubectl get pods -n monitoring" : "Monitoring stack is disabled (monitoring_enabled = false)"
+}
+
+output "monitoring_helm_releases" {
+  description = "Helm releases deployed for the monitoring stack."
+  value       = var.monitoring_enabled ? "helm list -n monitoring" : "Monitoring stack is disabled (monitoring_enabled = false)"
+}

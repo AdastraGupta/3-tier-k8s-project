@@ -8,6 +8,7 @@ A production-grade, cloud-native **3-tier task manager** application deployed on
 graph TB
     User["🌐 User / Browser"]
     GitHub["📦 GitHub Repository\n(AdastraGupta/3-tier-k8s-project · main)"]
+    Teams["📣 Microsoft Teams\n(CI/CD · GitOps · Alertmanager)"]
 
     subgraph "AWS Cloud — us-east-1"
         ING_ELB["☁️ AWS Elastic Load Balancer\n(nginx Ingress Controller · port 80)"]
@@ -15,13 +16,12 @@ graph TB
         subgraph "Amazon EKS Cluster (v1.30 · 2× t3.medium)"
             subgraph "argocd Namespace"
                 ArgoCD["🔄 ArgoCD Server\n(GitOps Controller · v2.11.3)"]
+                ArgoNotif["🔔 ArgoCD Notifications\n(sync · health alerts)"]
             end
 
             subgraph "taskmanager Namespace"
                 direction TB
-                TM_NS["📁 All k8s/ Manifests Applied
-(Namespace · Secrets · ConfigMaps
-Deployments · Services · Ingress)"]
+                TM_NS["📁 All k8s/ Manifests Applied\n(Namespace · Secrets · ConfigMaps\nDeployments · Services · Ingress)"]
                 subgraph "Ingress Layer"
                     ING["nginx Ingress Controller\n(path-based routing)"]
                 end
@@ -43,6 +43,15 @@ Deployments · Services · Ingress)"]
                 CM["ConfigMap + Secret\n(PGRST config · DB credentials)"]
             end
 
+            subgraph "monitoring Namespace"
+                PROM["📊 Prometheus 2.53\n(StatefulSet · 10Gi EBS gp3 TSDB)"]
+                GRAF["📈 Grafana 11.1\n(Deployment · NLB port 80)"]
+                GRAF_NLB["Grafana LoadBalancer\n(AWS NLB · port 80)"]
+                ALERT["🚨 Alertmanager 0.27\n(Deployment · 5Gi EBS gp3)"]
+                NE["node-exporter\n(DaemonSet · host metrics)"]
+                KSM["kube-state-metrics\n(Deployment · K8s metrics)"]
+            end
+
             subgraph "amazon-cloudwatch Namespace"
                 CWAgent["CloudWatch Agent DaemonSet\n(Prometheus Scraper)"]
             end
@@ -62,12 +71,16 @@ Deployments · Services · Ingress)"]
         end
     end
 
-    %% GitOps flow — ArgoCD syncs entire k8s/ dir to the cluster
+    %% GitOps flow — ArgoCD syncs k8s/ dir to cluster
     GitHub -->|"git push → auto-sync"| ArgoCD
     ArgoCD -->|"kubectl apply k8s/ (all manifests)"| TM_NS
-    ArgoCD -->|"kubectl apply k8s/logging/"| ES
+    ArgoCD --> ArgoNotif
+    ArgoNotif -->|"sync/health events"| Teams
 
-    %% User traffic — single entry point via nginx Ingress Controller ELB
+    %% CI/CD GitHub Actions → Teams
+    GitHub -.->|"Plan/Apply/Destroy events"| Teams
+
+    %% User traffic — single entry point via nginx Ingress ELB
     User -->|"HTTP :80"| ING_ELB
     ING_ELB -->|TCP| ING
     ING -->|"/ → frontend"| FS
@@ -83,7 +96,18 @@ Deployments · Services · Ingress)"]
     CM -.->|"env vars"| FD
     CM -.->|"env vars"| BD
 
-    %% Observability — CloudWatch
+    %% Prometheus Monitoring Stack
+    NE -.->|"node metrics"| PROM
+    KSM -.->|"k8s state metrics"| PROM
+    BD -.->|"POST /metrics (port 3000)"| PROM
+    FD -.->|"container metrics"| PROM
+    PROM -->|"query API"| GRAF
+    PROM -->|"alert rules"| ALERT
+    ALERT -->|"webhook POST"| Teams
+    GRAF_NLB -->|"TCP :80"| GRAF
+    User -->|"HTTP :80"| GRAF_NLB
+
+    %% CloudWatch Observability
     BD -.-|"Prometheus /metrics"| CWAgent
     CWAgent -->|"EMF Logs"| CWLogs
     CWLogs --> CWDash
@@ -96,11 +120,13 @@ Deployments · Services · Ingress)"]
     KB_ELB -->|"TCP :5601"| KB
     User -->|"HTTP :5601"| KB_ELB
 
-    %% Styles
+    %% Styles — Application
     style User fill:#4FC3F7,stroke:#0277BD,color:#000
     style GitHub fill:#24292E,stroke:#586069,color:#fff
+    style Teams fill:#6264A7,stroke:#464775,color:#fff
     style ING_ELB fill:#FF9900,stroke:#232F3E,color:#000
     style ArgoCD fill:#EF7B4D,stroke:#C04A1A,color:#fff
+    style ArgoNotif fill:#F4A261,stroke:#C04A1A,color:#000
     style TM_NS fill:#37474F,stroke:#546E7A,color:#fff
     style ING fill:#326CE5,stroke:#1A4DB5,color:#fff
     style FD fill:#66BB6A,stroke:#2E7D32,color:#000
@@ -108,11 +134,20 @@ Deployments · Services · Ingress)"]
     style BD fill:#FFA726,stroke:#E65100,color:#000
     style BS fill:#FFCC80,stroke:#E65100,color:#000
     style PS fill:#CE93D8,stroke:#6A1B9A,color:#000
+    style CM fill:#78909C,stroke:#37474F,color:#fff
     style RDS fill:#EF5350,stroke:#B71C1C,color:#fff
+    %% Styles — Monitoring Stack
+    style PROM fill:#E6522C,stroke:#B13A1E,color:#fff
+    style GRAF fill:#F5A623,stroke:#C07D10,color:#000
+    style GRAF_NLB fill:#FF9900,stroke:#232F3E,color:#000
+    style ALERT fill:#D63B25,stroke:#9B2A1C,color:#fff
+    style NE fill:#E6522C,stroke:#B13A1E,color:#fff
+    style KSM fill:#E6522C,stroke:#B13A1E,color:#fff
+    %% Styles — CloudWatch
     style CWAgent fill:#FF9900,stroke:#232F3E,color:#fff
     style CWLogs fill:#FFE0B2,stroke:#E65100,color:#000
     style CWDash fill:#FF9900,stroke:#232F3E,color:#000
-    style CM fill:#78909C,stroke:#37474F,color:#fff
+    %% Styles — EFK
     style ES fill:#005571,stroke:#003A4D,color:#fff
     style FB fill:#49BDA5,stroke:#2D8F7B,color:#000
     style KB fill:#E8478B,stroke:#C12D6B,color:#fff
@@ -129,7 +164,9 @@ Deployments · Services · Ingress)"]
 | **Database** | AWS RDS PostgreSQL 15 (`db.t4g.micro`, Single-AZ) |
 | **GitOps** | ArgoCD v2.11.3 — continuous delivery from this GitHub repository |
 | **CI/CD** | GitHub Actions — Terraform plan/apply pipeline with OIDC authentication |
-| **Observability** | AWS CloudWatch (Dashboard + Metric Alarms) |
+| **Metrics & Monitoring** | Prometheus 2.53 + Grafana 11.1 via `kube-prometheus-stack` (Helm-managed) |
+| **Alerting** | Alertmanager (MS Teams webhook routing) + AWS CloudWatch Alarms |
+| **Observability (AWS)** | AWS CloudWatch (Dashboard + Container Insights + Metric Alarms) |
 | **Centralized Logging** | EFK Stack — Elasticsearch 8.15, Fluent Bit 3.1, Kibana 8.15 (Helm-managed via Terraform) |
 | **Infrastructure as Code** | Terraform (S3 backend + DynamoDB state locking) |
 | **Networking** | Native Kubernetes Ingress (nginx), ClusterIP, ExternalName services |
@@ -153,14 +190,15 @@ Deployments · Services · Ingress)"]
 │   └── argocd-app.yaml               # ArgoCD Application manifest (taskmanager)
 │
 └── terraform/                        # Infrastructure as Code
-    ├── provider.tf                   # AWS + Kubernetes + Helm provider config
-    ├── variables.tf                  # All configurable inputs (incl. EFK vars)
+    ├── provider.tf                   # AWS + Kubernetes + Helm + Random provider config
+    ├── variables.tf                  # All configurable inputs (incl. EFK & Monitoring vars)
     ├── vpc.tf                        # VPC, public/private subnets, NAT Gateway
     ├── eks.tf                        # EKS cluster + managed node group + EBS CSI
     ├── rds.tf                        # RDS PostgreSQL instance + subnet/security groups
     ├── cloudwatch.tf                 # CloudWatch Log Groups, Dashboard, Metric Alarms
     ├── efk.tf                        # EFK logging stack (Helm: ES + Fluent Bit + Kibana)
-    └── outputs.tf                    # Key outputs (endpoints, commands, EFK)
+    ├── monitoring.tf                 # Prometheus + Grafana stack (Helm: kube-prometheus-stack)
+    └── outputs.tf                    # Key outputs (endpoints, commands, EFK, Grafana)
 ├── .github/
 │   └── workflows/
 │       └── terraform.yml             # CI/CD: plan on PR, auto-apply on push to main
@@ -444,6 +482,75 @@ terraform apply   # Helm handles rolling update automatically
 
 > [!NOTE]
 > For automated index lifecycle management (ILM), configure an ILM policy in Kibana under **Stack Management → Index Lifecycle Policies**.
+
+## Prometheus & Grafana Monitoring
+
+The cluster includes a production-ready **Prometheus + Grafana + Alertmanager** stack deployed via the official `kube-prometheus-stack` Helm chart ([`terraform/monitoring.tf`](terraform/monitoring.tf)).
+
+### Architecture & Components
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        KUBE-PROMETHEUS-STACK (monitoring)                       │
+├───────────────────┬───────────────────┬───────────────────┬─────────────────────┤
+│   Node Exporter   │ kube-state-metrics│  Prometheus TSDB  │       Grafana       │
+│  (Host Hardware)  │ (K8s Deployments) │ (EBS gp3 Storage) │ (LoadBalancer: 80)  │
+└─────────┬─────────┴─────────┬─────────┴─────────┬─────────┴──────────┬──────────┘
+          │                   │                   │                    │
+          └───────────────────┼───────────────────┘                    │
+                              ▼ scrapes                                ▼
+                  ┌───────────────────────┐                 ┌───────────────────────┐
+                  │      Alertmanager     │                 │   Pre-built EKS &     │
+                  │ (MS Teams Webhook)    │                 │ Workload Dashboards   │
+                  └───────────────────────┘                 └───────────────────────┘
+```
+
+| Component | Role | Chart / Version |
+|---|---|---|
+| **Prometheus Operator** | Manages CRDs (`ServiceMonitor`, `PodMonitor`, `PrometheusRule`) | `kube-prometheus-stack` 61.3.1 |
+| **Prometheus Server** | Scrapes metrics from nodes, pods, and PostgREST API (TSDB on 10Gi gp3) | Prometheus 2.53 |
+| **Alertmanager** | Groups, deduplicates, and routes alerts to **Microsoft Teams** | Alertmanager 0.27 |
+| **Grafana** | Visual dashboards (pre-loaded with Kubernetes Cluster & Workload boards) | Grafana 11.1 |
+| **node-exporter** | Gathers node-level CPU, memory, network, and disk I/O metrics | DaemonSet on every node |
+| **kube-state-metrics** | Exports Kubernetes resource state (pod counts, replica status, node health) | Deployment in `monitoring` |
+
+### Accessing Grafana
+
+#### 1. Retrieve the Auto-Generated Admin Password
+Terraform generates a cryptographically random 16-character password during deployment:
+
+```bash
+cd terraform
+terraform output -raw grafana_admin_password
+```
+
+#### 2. Get the Grafana LoadBalancer URL
+```bash
+# Option A: Via AWS Network Load Balancer (Wait ~2 min for AWS provisioning)
+kubectl get svc kube-prometheus-stack-grafana -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+
+# Option B: Via Port-Forward (Immediate access)
+kubectl port-forward svc/kube-prometheus-stack-grafana 3001:80 -n monitoring
+# Open http://localhost:3001 (User: admin)
+```
+
+### Pre-Built Dashboards Available in Grafana
+
+Once logged in, navigate to **Dashboards** to view pre-loaded boards:
+* **Kubernetes / Compute Resources / Cluster** — Total cluster CPU, memory, and pod capacity
+* **Kubernetes / Compute Resources / Namespace (Workloads)** — CPU & memory per deployment in `taskmanager`
+* **Kubernetes / Compute Resources / Node (Pods)** — Pod density and resource allocation per EKS node
+* **Node Exporter / Use Method / Node** — Hardware-level disk I/O, load average, and network throughput
+
+### Alertmanager → Microsoft Teams Routing
+
+Alertmanager is configured to automatically route firing alerts to your Microsoft Teams channel when `teams_webhook_url` is provided in Terraform or GitHub Secrets.
+
+Alerts include:
+- `KubePodCrashLooping` — Pod failing and restarting repeatedly
+- `KubeNodeNotReady` — EKS worker node experiencing hardware / network failure
+- `KubeMemoryQuotaOvercommit` — Cluster running out of memory headroom
+- `PostgresBackendDown` — PostgREST backend metrics endpoint unreachable
 
 ## CI/CD Pipeline
 
