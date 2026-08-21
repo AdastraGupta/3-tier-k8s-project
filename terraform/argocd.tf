@@ -269,9 +269,6 @@ resource "helm_release" "argocd" {
           repoURL        = "https://github.com/AdastraGupta/3-tier-k8s-project.git"
           targetRevision = "main"
           path           = "k8s"
-          directory = {
-            exclude = "argocd-*.yaml"
-          }
         }
         destination = {
           server    = "https://kubernetes.default.svc"

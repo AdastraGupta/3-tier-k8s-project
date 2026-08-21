@@ -285,33 +285,27 @@ kubectl run rds-init -n taskmanager --image=postgres:15-alpine --rm -i --restart
     GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO web_anon;"
 ```
 
-### 6. Bootstrap ArgoCD (GitOps) with MS Teams Alerts
+### 6. ArgoCD (GitOps) & MS Teams Alerts
 
-```bash
-# 1. Install ArgoCD
-kubectl apply -f k8s/argocd-namespace.yaml
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.11.3/manifests/install.yaml
-kubectl wait --for=condition=available deployment/argocd-server -n argocd --timeout=120s
+ArgoCD is **100% automated via Helm** (`terraform/argocd.tf`). When `terraform apply` completes:
+1. ArgoCD Server & Controllers are running in the `argocd` namespace.
+2. MS Teams notifications are configured and subscribed to sync events.
+3. The `taskmanager` Application is auto-created and syncing the `k8s/` directory.
 
-# 2. Configure MS Teams Webhook for GitOps notifications (optional)
-kubectl apply -f k8s/argocd-notifications.yaml
-kubectl -n argocd create secret generic argocd-notifications-secret \
-  --from-literal=msteams-webhook-url="<YOUR_TEAMS_WEBHOOK_URL>" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-# 3. Apply the Application manifest (auto-subscribes to notifications)
-kubectl apply -f k8s/argocd-app.yaml
-```
-
-Get the admin password:
+**Get the auto-generated admin password:**
 ```bash
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
 ```
 
-Access the ArgoCD UI:
+**Access the ArgoCD UI:**
 ```bash
-kubectl port-forward svc/argocd-server 8080:443 -n argocd
-# Open https://localhost:8080 (user: admin)
+# Option A: Via Internal Ingress Controller port-forward
+kubectl port-forward svc/nginx-internal-ingress-nginx-controller 8080:80 -n ingress-nginx
+# Open http://localhost:8080/argocd (username: admin)
+
+# Option B: Direct port-forward
+kubectl port-forward svc/argocd-server 8080:80 -n argocd
+# Open http://localhost:8080 (username: admin)
 ```
 
 ### 7. Push Changes to GitHub to Sync
