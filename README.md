@@ -24,11 +24,9 @@ graph TB
                 ING_PUB["nginx-public Controller\n(ingressClassName: nginx-public)"]
                 ING_INT["nginx-internal Controller\n(ingressClassName: nginx-internal)"]
                 INT_ING["internal-tools-ingress\n(ingressClassName: nginx-internal)"]
-                subgraph "ExternalName Cross-Namespace Proxies"
-                    EXT_GRAF["grafana-external\n(ExternalName → monitoring)"]
-                    EXT_KB["kibana-external\n(ExternalName → logging)"]
-                    EXT_ARGO["argocd-external\n(ExternalName → argocd)"]
-                end
+                EXT_GRAF["grafana-external\n(ExternalName → monitoring)"]
+                EXT_KB["kibana-external\n(ExternalName → logging)"]
+                EXT_ARGO["argocd-external\n(ExternalName → argocd)"]
             end
 
             subgraph "argocd Namespace (Helm: argo/argo-cd)"
