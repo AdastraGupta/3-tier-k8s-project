@@ -232,12 +232,12 @@ resource "aws_cloudwatch_metric_alarm" "rds_high_cpu" {
   alarm_name          = "${var.cluster_name}-rds-high-cpu"
   alarm_description   = "RDS PostgreSQL CPU utilization is critically high (>80%). Check for slow queries or scale the DB instance."
   comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 2     # Must breach for 2 consecutive periods
+  evaluation_periods  = 2 # Must breach for 2 consecutive periods
   metric_name         = "CPUUtilization"
   namespace           = "AWS/RDS"
-  period              = 300   # 5-minute evaluation window
+  period              = 300 # 5-minute evaluation window
   statistic           = "Average"
-  threshold           = 80    # Alert at 80% CPU
+  threshold           = 80 # Alert at 80% CPU
   treat_missing_data  = "notBreaching"
 
   dimensions = {
