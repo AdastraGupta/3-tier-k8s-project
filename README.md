@@ -33,9 +33,9 @@ graph TB
 
             subgraph "taskmanager Namespace (Application Tier)"
                 direction TB
-                TM_ING["ingress.yaml\n(nginx-public: / and /api)"]
+                TM_ING["ingress.yaml\n(nginx-public: / and /api→rewrite→/)"]
                 subgraph "Frontend Tier"
-                    FD["Frontend Pods\n(nginx:alpine)\n3 replicas · port 80"]
+                    FD["Frontend Pods\n(nginx:1.25-alpine)\n3 replicas · port 80"]
                     FS["frontend-svc\n(ClusterIP :80)"]
                 end
                 subgraph "Backend Tier"
@@ -43,9 +43,9 @@ graph TB
                     BS["backend-svc\n(ClusterIP :3000)"]
                 end
                 subgraph "Database Access"
-                    PS["postgres-svc\n(ExternalName → RDS)"]
+                    PS["postgres-svc\n(ExternalName :5432 → RDS)"]
                 end
-                CM["ConfigMaps & Secrets\n(PGRST config · DB credentials)"]
+                CM["ConfigMaps & Secrets\n(app-config · app-secret)"]
             end
 
             subgraph "monitoring Namespace (Helm: kube-prometheus-stack)"
@@ -373,8 +373,10 @@ kubectl port-forward svc/backend-svc 3000:3000 -n taskmanager
 | **PostgREST as Backend** | Auto-generates a full REST API from PostgreSQL schema — zero backend code to maintain |
 | **AWS RDS (not in-cluster Postgres)** | Managed, automated backups, Multi-AZ failover capability, separate lifecycle from EKS |
 | **ExternalName Service for RDS** | Backend pods connect via `postgres-svc:5432` — no hardcoded DNS, easy to swap |
+| **Dual Nginx Ingress Controllers** | `nginx-public` (internet-facing NLB) separates public app traffic from `nginx-internal` (VPC-only NLB) which serves admin tools — zero attack surface on Grafana, Kibana, ArgoCD |
 | **Native K8s Ingress (no Istio)** | Eliminates sidecar overhead (~100–150 MB RAM/CPU per pod), removes webhook deadlock risk |
-| **ArgoCD GitOps** | Git is the single source of truth; all changes are auditable, rollback is a `git revert` |
+| **ExternalName proxy pattern** | `ingress-internal.yaml` uses `ExternalName` services in the `ingress-nginx` namespace to reach ClusterIP services across namespaces (`monitoring`, `logging`, `argocd`) without exposing them |
+| **ArgoCD via Helm (not raw YAML)** | Zero manual `kubectl apply` steps — MS Teams notifications, app provisioning and namespace creation all automated via `terraform apply` |
 | **`sslmode=require` in DB URI** | AWS RDS enforces TLS by default; this ensures encrypted connections from PostgREST |
 | **`t3.medium` nodes** | Required for EFK stack (~2–3 GB RAM); configurable via `var.node_instance_type` |
 | **EFK via Helm (not raw YAML)** | Official Helm charts (elastic/elasticsearch, fluent/fluent-bit, elastic/kibana) — production-grade with upgradeable chart versions, parameterized via Terraform variables |
