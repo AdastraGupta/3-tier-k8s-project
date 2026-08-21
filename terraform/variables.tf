@@ -57,7 +57,7 @@ variable "kubernetes_version" {
 variable "node_instance_type" {
   description = "EC2 instance type for the EKS managed node group."
   type        = string
-  default     = "t3.small" # 2 vCPU, 2GB RAM — optimal low-cost instance for EKS add-ons
+  default     = "t3.medium" # 2 vCPU, 4GB RAM — required for EFK stack (ES needs ~1-2GB)
 }
 
 variable "node_min_size" {
@@ -76,6 +76,20 @@ variable "node_desired_size" {
   description = "Desired number of nodes in the managed node group."
   type        = number
   default     = 2 # 2 nodes required for EKS ENI pod capacity (maxPods limit)
+}
+
+# ─── EFK Logging Stack ─────────────────────────────────────────────────────────
+
+variable "efk_enabled" {
+  description = "Enable the EFK (Elasticsearch, Fluent Bit, Kibana) logging stack."
+  type        = bool
+  default     = true
+}
+
+variable "efk_elasticsearch_volume_size" {
+  description = "Size of the EBS gp3 PersistentVolume for Elasticsearch data (in Gi)."
+  type        = number
+  default     = 10
 }
 
 # ─── RDS PostgreSQL ────────────────────────────────────────────────────────────

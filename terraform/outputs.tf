@@ -98,3 +98,25 @@ output "cloudwatch_dashboard_url" {
   description = "Direct AWS Console URL to open the CloudWatch Dashboard after terraform apply."
   value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${aws_cloudwatch_dashboard.taskmanager.dashboard_name}"
 }
+
+# ─── EFK Logging Stack (Helm) ──────────────────────────────────────────────────
+
+output "kibana_access_command" {
+  description = "Command to get the Kibana LoadBalancer URL. Wait ~2 minutes for AWS to provision the ELB."
+  value       = var.efk_enabled ? "kubectl get svc kibana-kibana -n logging -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'" : "EFK stack is disabled (efk_enabled = false)"
+}
+
+output "efk_status_command" {
+  description = "Command to check the health of all EFK stack pods."
+  value       = var.efk_enabled ? "kubectl get pods -n logging" : "EFK stack is disabled (efk_enabled = false)"
+}
+
+output "elasticsearch_health_command" {
+  description = "Command to check the Elasticsearch cluster health."
+  value       = var.efk_enabled ? "kubectl exec -n logging elasticsearch-master-0 -- curl -s http://localhost:9200/_cluster/health?pretty" : "EFK stack is disabled (efk_enabled = false)"
+}
+
+output "efk_helm_releases" {
+  description = "Helm releases deployed for the EFK logging stack."
+  value       = var.efk_enabled ? "helm list -n logging" : "EFK stack is disabled (efk_enabled = false)"
+}

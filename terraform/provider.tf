@@ -16,14 +16,17 @@ terraform {
     }
   }
 
-  # Optional: configure an S3 backend to store state remotely
-  # Uncomment and fill in to enable remote state (recommended for teams)
-  # backend "s3" {
-  #   bucket         = "your-terraform-state-bucket"
-  #   key            = "k8s-task-manager/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   encrypt        = true
-  # }
+  # S3 backend for remote state storage (required for CI/CD).
+  # Bucket, key, region, and DynamoDB table are provided via -backend-config
+  # flags in the GitHub Actions workflow for environment-specific state isolation.
+  backend "s3" {
+    # Partial configuration — these values are injected at runtime:
+    #   -backend-config="bucket=<TF_STATE_BUCKET>"
+    #   -backend-config="key=k8s-task-manager/<env>/terraform.tfstate"
+    #   -backend-config="region=us-east-1"
+    #   -backend-config="encrypt=true"
+    #   -backend-config="dynamodb_table=<TF_STATE_LOCK_TABLE>"
+  }
 }
 
 provider "aws" {

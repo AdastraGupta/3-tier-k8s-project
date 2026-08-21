@@ -30,6 +30,11 @@ module "eks" {
     vpc-cni = {
       most_recent = true
     }
+    # EBS CSI Driver — required for dynamic EBS volume provisioning (gp3 StorageClass)
+    # Used by Elasticsearch PVCs in the EFK logging stack.
+    aws-ebs-csi-driver = {
+      most_recent = true
+    }
   }
 
   # ─── Managed Node Group ───────────────────────────────────────────────────────
@@ -47,7 +52,7 @@ module "eks" {
       # Nodes run in private subnets — not exposed to the internet directly
       subnet_ids = module.vpc.private_subnets
 
-      disk_size = 20 # GB of EBS storage per node
+      disk_size = 3 # GB of EBS storage per node
 
       labels = {
         role = "taskmanager"
