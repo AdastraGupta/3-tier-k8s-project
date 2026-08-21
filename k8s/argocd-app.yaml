@@ -5,6 +5,11 @@ metadata:
   namespace: argocd
   labels:
     app: taskmanager
+  annotations:
+    # ── MS Teams Notifications Subscriptions ─────────────────────────────────
+    notifications.argoproj.io/subscribe.on-sync-succeeded.msteams: ""
+    notifications.argoproj.io/subscribe.on-sync-failed.msteams: ""
+    notifications.argoproj.io/subscribe.on-health-degraded.msteams: ""
   # Finalizer ensures ArgoCD deletes all managed resources when this Application is deleted
   finalizers:
     - resources-finalizer.argocd.argoproj.io

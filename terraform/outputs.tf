@@ -45,6 +45,7 @@ output "argocd_bootstrap_commands" {
     kubectl apply -f k8s/argocd-namespace.yaml
     kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.11.3/manifests/install.yaml
     kubectl wait --for=condition=available deployment/argocd-server -n argocd --timeout=120s
+    kubectl apply -f k8s/argocd-notifications.yaml
     kubectl apply -f k8s/argocd-app.yaml
     kubectl port-forward svc/argocd-server 8080:443 -n argocd
   EOT
