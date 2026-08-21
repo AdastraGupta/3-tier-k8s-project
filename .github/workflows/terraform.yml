@@ -13,9 +13,10 @@
 #   - Sensitive outputs masked
 #   - Least-privilege IAM role
 #
-# Required GitHub Secrets:
+# Required / Optional GitHub Secrets:
 #   - AWS_ROLE_ARN          : IAM Role ARN for OIDC federation
 #   - TF_VAR_db_password    : RDS master password (injected as TF variable)
+#   - TEAMS_WEBHOOK_URL     : (Optional) Microsoft Teams incoming webhook URL for CI/CD alerts
 #
 # Required GitHub Variables (Settings → Variables):
 #   - AWS_REGION            : e.g. us-east-1
@@ -291,6 +292,85 @@ jobs:
               });
             }
 
+      # ── Send MS Teams Notification (Plan) ──────────────────────────────────
+      - name: Send MS Teams Notification (Plan)
+        if: always()
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const webhookUrl = process.env.TEAMS_WEBHOOK_URL;
+            if (!webhookUrl) {
+              console.log('TEAMS_WEBHOOK_URL not configured. Skipping MS Teams notification.');
+              return;
+            }
+
+            const outcome = '${{ steps.plan.outcome }}';
+            const isSuccess = outcome === 'success';
+            const envName = '${{ github.event.inputs.environment || 'dev' }}';
+            const add = '${{ steps.plan_summary.outputs.add }}' || '0';
+            const change = '${{ steps.plan_summary.outputs.change }}' || '0';
+            const destroy = '${{ steps.plan_summary.outputs.destroy }}' || '0';
+
+            const themeColor = isSuccess ? '0076D7' : 'D83B01';
+            const title = isSuccess 
+              ? `📋 Terraform Plan Succeeded — ${envName}`
+              : `❌ Terraform Plan Failed — ${envName}`;
+
+            const facts = [
+              { name: 'Environment', value: envName },
+              { name: 'Status', value: isSuccess ? 'Plan Ready ✅' : 'Failed ❌' },
+              { name: 'Changes', value: `+${add} to add, ~${change} to change, -${destroy} to destroy` },
+              { name: 'Triggered by', value: `@${context.actor}` },
+              { name: 'Event', value: context.eventName }
+            ];
+
+            if (context.payload.pull_request) {
+              facts.push({ name: 'Pull Request', value: `#${context.payload.pull_request.number} (${context.payload.pull_request.title})` });
+            }
+
+            const actions = [
+              {
+                "@type": "OpenUri",
+                "name": "View Workflow Run",
+                "targets": [{ "os": "default", "uri": `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}` }]
+              }
+            ];
+
+            if (context.payload.pull_request) {
+              actions.push({
+                "@type": "OpenUri",
+                "name": "View Pull Request",
+                "targets": [{ "os": "default", "uri": context.payload.pull_request.html_url }]
+              });
+            }
+
+            const payload = {
+              "@type": "MessageCard",
+              "@context": "http://schema.org/extensions",
+              "themeColor": themeColor,
+              "summary": title,
+              "sections": [{
+                "activityTitle": title,
+                "activitySubtitle": `Repository: ${context.repo.owner}/${context.repo.repo}`,
+                "facts": facts,
+                "markdown": true
+              }],
+              "potentialAction": actions
+            };
+
+            try {
+              const res = await fetch(webhookUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+              });
+              console.log(`Teams notification sent. Status: ${res.status}`);
+            } catch (err) {
+              console.error('Error sending Teams notification:', err);
+            }
+
       # ── Fail if plan errored ───────────────────────────────────────────────
       - name: Check plan status
         if: steps.plan.outcome == 'failure'
@@ -399,6 +479,80 @@ jobs:
               context: 'terraform/apply'
             });
 
+      # ── Send MS Teams Notification (Apply) ─────────────────────────────────
+      - name: Send MS Teams Notification (Apply)
+        if: always()
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const webhookUrl = process.env.TEAMS_WEBHOOK_URL;
+            if (!webhookUrl) {
+              console.log('TEAMS_WEBHOOK_URL not configured. Skipping MS Teams notification.');
+              return;
+            }
+
+            const outcome = '${{ steps.apply.outcome }}';
+            const isSuccess = outcome === 'success';
+            const envName = '${{ github.event.inputs.environment || 'dev' }}';
+            const clusterName = '${{ steps.outputs.outputs.cluster_name }}' || 'taskmanager-cluster';
+            const dashboardUrl = '${{ steps.outputs.outputs.dashboard_url }}';
+
+            const themeColor = isSuccess ? '107C10' : 'D83B01';
+            const title = isSuccess 
+              ? `🚀 Terraform Apply Succeeded — ${envName}`
+              : `❌ Terraform Apply Failed — ${envName}`;
+
+            const facts = [
+              { name: 'Environment', value: envName },
+              { name: 'Status', value: isSuccess ? 'Deployed Successfully ✅' : 'Failed ❌' },
+              { name: 'Cluster', value: clusterName },
+              { name: 'Triggered by', value: `@${context.actor}` },
+              { name: 'Commit', value: `${context.sha.substring(0, 7)}` }
+            ];
+
+            const actions = [
+              {
+                "@type": "OpenUri",
+                "name": "View Workflow Run",
+                "targets": [{ "os": "default", "uri": `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}` }]
+              }
+            ];
+
+            if (isSuccess && dashboardUrl && dashboardUrl.startsWith('http')) {
+              actions.push({
+                "@type": "OpenUri",
+                "name": "📊 Open CloudWatch Dashboard",
+                "targets": [{ "os": "default", "uri": dashboardUrl }]
+              });
+            }
+
+            const payload = {
+              "@type": "MessageCard",
+              "@context": "http://schema.org/extensions",
+              "themeColor": themeColor,
+              "summary": title,
+              "sections": [{
+                "activityTitle": title,
+                "activitySubtitle": `Repository: ${context.repo.owner}/${context.repo.repo}`,
+                "facts": facts,
+                "markdown": true
+              }],
+              "potentialAction": actions
+            };
+
+            try {
+              const res = await fetch(webhookUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+              });
+              console.log(`Teams notification sent. Status: ${res.status}`);
+            } catch (err) {
+              console.error('Error sending Teams notification:', err);
+            }
+
   # ════════════════════════════════════════════════════════════════════════════
   # Job 4: Terraform Destroy (manual trigger only)
   # ════════════════════════════════════════════════════════════════════════════
@@ -450,6 +604,7 @@ jobs:
           TF_VAR_db_password: ${{ secrets.TF_VAR_db_password }}
 
       - name: Terraform Destroy
+        id: destroy
         run: |
           terraform destroy \
             -var="environment=${{ github.event.inputs.environment || 'dev' }}" \
@@ -459,3 +614,67 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         env:
           TF_VAR_db_password: ${{ secrets.TF_VAR_db_password }}
+
+      # ── Send MS Teams Notification (Destroy) ───────────────────────────────
+      - name: Send MS Teams Notification (Destroy)
+        if: always()
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const webhookUrl = process.env.TEAMS_WEBHOOK_URL;
+            if (!webhookUrl) {
+              console.log('TEAMS_WEBHOOK_URL not configured. Skipping MS Teams notification.');
+              return;
+            }
+
+            const outcome = '${{ steps.destroy.outcome }}';
+            const isSuccess = outcome === 'success';
+            const envName = '${{ github.event.inputs.environment || 'dev' }}';
+
+            const themeColor = isSuccess ? 'E81123' : 'D83B01';
+            const title = isSuccess 
+              ? `💣 Terraform Destroy Completed — ${envName}`
+              : `❌ Terraform Destroy Failed — ${envName}`;
+
+            const facts = [
+              { name: 'Environment', value: envName },
+              { name: 'Status', value: isSuccess ? 'Destroyed 🗑️' : 'Failed ❌' },
+              { name: 'Triggered by', value: `@${context.actor}` },
+              { name: 'Action', value: 'Infrastructure Teardown' }
+            ];
+
+            const actions = [
+              {
+                "@type": "OpenUri",
+                "name": "View Workflow Run",
+                "targets": [{ "os": "default", "uri": `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}` }]
+              }
+            ];
+
+            const payload = {
+              "@type": "MessageCard",
+              "@context": "http://schema.org/extensions",
+              "themeColor": themeColor,
+              "summary": title,
+              "sections": [{
+                "activityTitle": title,
+                "activitySubtitle": `⚠️ Infrastructure Teardown on ${context.repo.owner}/${context.repo.repo}`,
+                "facts": facts,
+                "markdown": true
+              }],
+              "potentialAction": actions
+            };
+
+            try {
+              const res = await fetch(webhookUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+              });
+              console.log(`Teams notification sent. Status: ${res.status}`);
+            } catch (err) {
+              console.error('Error sending Teams notification:', err);
+            }
+

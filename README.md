@@ -517,10 +517,11 @@ Create a trust policy (`trust-policy.json`) and IAM role with the necessary perm
 #### 3. Configure GitHub Repository Settings
 
 **Secrets** (Settings → Secrets → Actions):
-| Secret | Value |
-|---|---|
-| `AWS_ROLE_ARN` | `arn:aws:iam::123456789012:role/github-actions-terraform` |
-| `TF_VAR_db_password` | Your RDS master password |
+| Secret | Value | Description |
+|---|---|---|
+| `AWS_ROLE_ARN` | `arn:aws:iam::123456789012:role/github-actions-terraform` | IAM Role ARN for OIDC federation |
+| `TF_VAR_db_password` | Your RDS master password | Injected securely for RDS / PostgREST |
+| `TEAMS_WEBHOOK_URL` | *(Optional)* `https://outlook.office.com/webhook/...` | MS Teams Incoming Webhook for CI/CD alerts |
 
 **Variables** (Settings → Variables → Actions):
 | Variable | Value |
