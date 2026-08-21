@@ -341,19 +341,19 @@ Any changes committed and pushed to the `k8s/` directory on the `main` branch wi
 
 ## Accessing the Application
 
-### Frontend Web UI (via nginx Ingress)
+### Frontend Web UI & API (via Public Ingress NLB)
 
 ```bash
-# Get the nginx Ingress Controller's external hostname (single public ELB)
-kubectl get svc -n ingress-nginx ingress-nginx-controller
+# Get the Public Ingress Controller's external NLB hostname
+kubectl get svc nginx-public-ingress-nginx-controller -n ingress-nginx \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 # Use the EXTERNAL-IP once AWS provisions the Load Balancer (~2 min)
 ```
 
-Open `http://<EXTERNAL-IP>/` in your browser.
+- **Frontend Web UI**: `http://<PUBLIC-NLB-HOSTNAME>/`
+- **Backend REST API**: `http://<PUBLIC-NLB-HOSTNAME>/api/tasks`
 
-For the REST API: `http://<EXTERNAL-IP>/api/tasks`
-
-### Port-Forward (Development)
+### Port-Forward (Local Development)
 
 ```bash
 # Frontend
@@ -423,7 +423,7 @@ The project includes a full **EFK stack** (Elasticsearch, Fluent Bit, Kibana) fo
                     │ Query API
          ┌──────────▼──────────┐
          │    Kibana 8.15      │  ← Helm: elastic/kibana
-         │  LoadBalancer :5601 │  ← AWS ELB
+         │  ClusterIP (:5601)  │  ← Routed via /kibana on Internal Ingress
          └─────────────────────┘
 ```
 
@@ -464,16 +464,14 @@ terraform apply -var="efk_enabled=false"
 
 ### Access Kibana
 
-Kibana is exposed via an **AWS LoadBalancer** on port 5601:
+Kibana is exposed as a **ClusterIP service** and routed via the **Internal Ingress NLB** at `/kibana`:
 
 ```bash
-# Get the Kibana LoadBalancer URL (wait ~2 min for ELB provisioning)
-kubectl get svc kibana-kibana -n logging
-# Open http://<EXTERNAL-IP>:5601 in your browser
-```
+# Option A: Via Internal Ingress Controller port-forward
+kubectl port-forward svc/nginx-internal-ingress-nginx-controller 8080:80 -n ingress-nginx
+# Open http://localhost:8080/kibana in your browser
 
-Alternatively, use port-forward for local access:
-```bash
+# Option B: Direct port-forward
 kubectl port-forward svc/kibana-kibana 5601:5601 -n logging
 # Open http://localhost:5601
 ```
@@ -524,11 +522,11 @@ The cluster includes a production-ready **Prometheus + Grafana + Alertmanager** 
 │                        KUBE-PROMETHEUS-STACK (monitoring)                       │
 ├───────────────────┬───────────────────┬───────────────────┬─────────────────────┤
 │   Node Exporter   │ kube-state-metrics│  Prometheus TSDB  │       Grafana       │
-│  (Host Hardware)  │ (K8s Deployments) │ (EBS gp3 Storage) │ (LoadBalancer: 80)  │
+│  (Host Hardware)  │ (K8s Deployments) │ (EBS gp3 Storage) │ (ClusterIP :80)     │
 └─────────┬─────────┴─────────┬─────────┴─────────┬─────────┴──────────┬──────────┘
           │                   │                   │                    │
           └───────────────────┼───────────────────┘                    │
-                              ▼ scrapes                                ▼
+                              ▼ scrapes                                ▼ /grafana path
                   ┌───────────────────────┐                 ┌───────────────────────┐
                   │      Alertmanager     │                 │   Pre-built EKS &     │
                   │ (MS Teams Webhook)    │                 │ Workload Dashboards   │
@@ -554,12 +552,15 @@ cd terraform
 terraform output -raw grafana_admin_password
 ```
 
-#### 2. Get the Grafana LoadBalancer URL
-```bash
-# Option A: Via AWS Network Load Balancer (Wait ~2 min for AWS provisioning)
-kubectl get svc kube-prometheus-stack-grafana -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+#### 2. Access the Grafana Dashboard
+Grafana is exposed as a **ClusterIP service** and routed via the **Internal Ingress NLB** at `/grafana`:
 
-# Option B: Via Port-Forward (Immediate access)
+```bash
+# Option A: Via Internal Ingress Controller port-forward
+kubectl port-forward svc/nginx-internal-ingress-nginx-controller 8080:80 -n ingress-nginx
+# Open http://localhost:8080/grafana (User: admin)
+
+# Option B: Direct port-forward
 kubectl port-forward svc/kube-prometheus-stack-grafana 3001:80 -n monitoring
 # Open http://localhost:3001 (User: admin)
 ```
