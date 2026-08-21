@@ -23,7 +23,12 @@ graph TB
             subgraph "ingress-nginx Namespace (Dual Ingress Controllers)"
                 ING_PUB["nginx-public Controller\n(ingressClassName: nginx-public)"]
                 ING_INT["nginx-internal Controller\n(ingressClassName: nginx-internal)"]
-                INT_ING_RES["ingress-internal.yaml\n(ExternalName proxies)"]
+                INT_ING["internal-tools-ingress\n(ingressClassName: nginx-internal)"]
+                subgraph "ExternalName Cross-Namespace Proxies"
+                    EXT_GRAF["grafana-external\n(ExternalName → monitoring)"]
+                    EXT_KB["kibana-external\n(ExternalName → logging)"]
+                    EXT_ARGO["argocd-external\n(ExternalName → argocd)"]
+                end
             end
 
             subgraph "argocd Namespace (Helm: argo/argo-cd)"
@@ -92,13 +97,16 @@ graph TB
     FS --> FD
     BS --> BD
 
-    %% 🔒 INTERNAL TRAFFIC FLOW: DevOps → Internal NLB → nginx-internal → Tools
+    %% 🔒 INTERNAL TRAFFIC FLOW: DevOps → Internal NLB → nginx-internal → ExternalName Proxies → Target Tools
     DevOps -->|"VPN / SSM / Port-Forward"| INT_NLB
     INT_NLB --> ING_INT
-    ING_INT --> INT_ING_RES
-    INT_ING_RES -->|"Path: /grafana"| GRAF
-    INT_ING_RES -->|"Path: /kibana"| KB
-    INT_ING_RES -->|"Path: /argocd"| ArgoCD
+    ING_INT --> INT_ING
+    INT_ING -->|"Path: /grafana"| EXT_GRAF
+    INT_ING -->|"Path: /kibana"| EXT_KB
+    INT_ING -->|"Path: /argocd"| EXT_ARGO
+    EXT_GRAF -->|"kube-prometheus-stack-grafana:80"| GRAF
+    EXT_KB -->|"kibana-kibana:5601"| KB
+    EXT_ARGO -->|"argocd-server:80"| ArgoCD
 
     %% Application Backend → Database
     BD -->|"PGRST_DB_URI (Port 5432)"| PS
@@ -138,10 +146,13 @@ graph TB
     style PUB_NLB fill:#FF9900,stroke:#232F3E,color:#000
     style INT_NLB fill:#5C6BC0,stroke:#283593,color:#fff
 
-    %% Styles — Ingress Controllers
+    %% Styles — Ingress Controllers & Proxies
     style ING_PUB fill:#326CE5,stroke:#1A4DB5,color:#fff
     style ING_INT fill:#283593,stroke:#1A237E,color:#fff
-    style INT_ING_RES fill:#3F51B5,stroke:#1A237E,color:#fff
+    style INT_ING fill:#3F51B5,stroke:#1A237E,color:#fff
+    style EXT_GRAF fill:#CE93D8,stroke:#6A1B9A,color:#000
+    style EXT_KB fill:#CE93D8,stroke:#6A1B9A,color:#000
+    style EXT_ARGO fill:#CE93D8,stroke:#6A1B9A,color:#000
 
     %% Styles — ArgoCD GitOps
     style ArgoCD fill:#EF7B4D,stroke:#C04A1A,color:#fff
@@ -177,9 +188,10 @@ graph TB
 
 ### Architecture Highlights
 
-1. **Dual Ingress Segmentation (Split-Horizon):**
+1. **Dual Ingress Segmentation & Cross-Namespace `ExternalName` Proxies:**
    - **Public NLB (`nginx-public`)**: Internet-facing load balancer serving the Frontend UI (`/`) and PostgREST backend API (`/api`).
-   - **Internal NLB (`nginx-internal`)**: Private VPC load balancer with zero public attack surface, serving **Grafana** (`/grafana`), **Kibana** (`/kibana`), and **ArgoCD** (`/argocd`).
+   - **Internal NLB (`nginx-internal`)**: Private VPC load balancer serving **Grafana** (`/grafana`), **Kibana** (`/kibana`), and **ArgoCD** (`/argocd`).
+   - **Cross-Namespace ExternalName Services**: Ingress rules in `ingress-nginx` route through 3 dedicated `ExternalName` proxy services (`grafana-external`, `kibana-external`, `argocd-external`) that resolve target service FQDNs across namespaces (`monitoring`, `logging`, `argocd`).
 2. **Automated GitOps Engine (ArgoCD via Helm):**
    - Fully provisioned by Terraform. Automatically synchronizes `k8s/` manifests from GitHub into the `taskmanager` namespace with self-healing and auto-pruning.
 3. **Triple-Layer Alerting System (Microsoft Teams Webhook):**
