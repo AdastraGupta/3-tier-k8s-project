@@ -5,22 +5,26 @@ metadata:
   namespace: taskmanager
   labels:
     app: taskmanager
+    tier: public
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    # Rewrite /api → / so PostgREST receives clean requests without the /api prefix
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
 spec:
-  ingressClassName: nginx
+  ingressClassName: nginx-public
   rules:
     - http:
         paths:
-          - path: /
-            pathType: Prefix
+          - path: /()(.*)
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: frontend-svc
                 port:
                   number: 80
-          - path: /api
-            pathType: Prefix
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: backend-svc

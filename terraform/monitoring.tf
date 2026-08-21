@@ -57,11 +57,18 @@ resource "helm_release" "kube_prometheus_stack" {
         enabled       = true
         adminPassword = random_password.grafana_admin[0].result
 
+        # ClusterIP — served via internal Ingress Controller (nginx-internal).
+        # Access: http://<INTERNAL-NLB-IP>/grafana (requires VPN or kubectl port-forward)
         service = {
-          type = "LoadBalancer"
+          type = "ClusterIP"
           port = 80
-          annotations = {
-            "service.beta.kubernetes.io/aws-load-balancer-type" = "nlb"
+        }
+
+        # GrafanaIni: set root_url so links/redirects work correctly behind /grafana path
+        grafana_ini = {
+          server = {
+            root_url            = "%(protocol)s://%(domain)s/grafana/"
+            serve_from_sub_path = true
           }
         }
 

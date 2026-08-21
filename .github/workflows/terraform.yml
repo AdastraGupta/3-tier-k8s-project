@@ -601,11 +601,12 @@ jobs:
       # ── Delete K8s LoadBalancer services first (to release ENIs) ─────────
       - name: Pre-destroy cleanup
         run: |
-          echo "⚠️ Cleaning up LoadBalancer services to release ENIs before VPC destroy..."
+          echo "⚠️ Cleaning up NLB services to release ENIs before VPC destroy..."
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name taskmanager-cluster || true
-          kubectl delete svc kube-prometheus-stack-grafana -n monitoring --ignore-not-found=true || true
-          kubectl delete svc kibana-kibana -n logging --ignore-not-found=true || true
-          kubectl delete svc frontend-svc -n taskmanager --ignore-not-found=true || true
+          # Delete the two Ingress Controller NLBs (Public + Internal) — these
+          # are now the only AWS Load Balancers in the cluster.
+          kubectl delete svc nginx-public-ingress-nginx-controller -n ingress-nginx --ignore-not-found=true || true
+          kubectl delete svc nginx-internal-ingress-nginx-controller -n ingress-nginx --ignore-not-found=true || true
           echo "Waiting 60s for ENIs to detach..."
           sleep 60
         continue-on-error: true

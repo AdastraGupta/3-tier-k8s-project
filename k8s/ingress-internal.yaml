@@ -1,0 +1,129 @@
+# ─── Internal Ingress — Admin Tools ───────────────────────────────────────────
+#
+# Routes internal admin traffic to Grafana, Kibana, and ArgoCD.
+# Uses the nginx-internal IngressClass, which is backed by an INTERNAL-ONLY
+# AWS Network Load Balancer (VPC private IP, never reachable from the internet).
+#
+# Path-based routing (no custom domain required):
+#   http://<INTERNAL-NLB-IP>/grafana/  → Grafana (monitoring namespace)
+#   http://<INTERNAL-NLB-IP>/kibana/   → Kibana   (logging namespace)
+#   http://<INTERNAL-NLB-IP>/argocd/   → ArgoCD   (argocd namespace)
+#
+# ⚠️  Access Requirements:
+#   - This LB has NO public IP. You MUST use one of:
+#     1. kubectl port-forward (quickest for dev):
+#        kubectl port-forward svc/nginx-internal-ingress-nginx-controller \
+#          8080:80 -n ingress-nginx
+#        → Then open http://localhost:8080/grafana
+#     2. AWS SSM Session Manager port tunnel (no VPN needed)
+#     3. AWS Client VPN / WireGuard / Tailscale to the VPC CIDR (10.0.0.0/16)
+#
+# ⚠️  Cross-Namespace Routing:
+#   nginx-internal uses the external-name Service trick:
+#   Each service below is an ExternalName that resolves the backend service's
+#   FQDN across namespaces, keeping all Ingress rules in one manifest file.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ─── Grafana ExternalName Service (cross-namespace reference) ─────────────────
+# Allows the Ingress in the default/ingress-nginx namespace to reach the
+# Grafana ClusterIP service in the monitoring namespace.
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-external
+  namespace: ingress-nginx
+  labels:
+    app: grafana-proxy
+    tier: internal
+spec:
+  type: ExternalName
+  externalName: kube-prometheus-stack-grafana.monitoring.svc.cluster.local
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# ─── Kibana ExternalName Service (cross-namespace reference) ──────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana-external
+  namespace: ingress-nginx
+  labels:
+    app: kibana-proxy
+    tier: internal
+spec:
+  type: ExternalName
+  externalName: kibana-kibana.logging.svc.cluster.local
+  ports:
+    - port: 5601
+      targetPort: 5601
+
+---
+# ─── ArgoCD ExternalName Service (cross-namespace reference) ──────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: argocd-external
+  namespace: ingress-nginx
+  labels:
+    app: argocd-proxy
+    tier: internal
+spec:
+  type: ExternalName
+  externalName: argocd-server.argocd.svc.cluster.local
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# ─── Internal Ingress Rules ───────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: internal-tools-ingress
+  namespace: ingress-nginx
+  labels:
+    app: internal-tools
+    tier: internal
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    # Required for ExternalName services to work correctly with nginx
+    nginx.ingress.kubernetes.io/upstream-vhost: $service_name.$namespace.svc.cluster.local
+spec:
+  ingressClassName: nginx-internal
+  rules:
+    - http:
+        paths:
+          # ── Grafana ────────────────────────────────────────────────────────
+          # Routes /grafana/* → Grafana ClusterIP service (monitoring namespace)
+          # Grafana is configured with serve_from_sub_path=true in monitoring.tf
+          - path: /grafana(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: grafana-external
+                port:
+                  number: 80
+
+          # ── Kibana ─────────────────────────────────────────────────────────
+          # Routes /kibana/* → Kibana ClusterIP service (logging namespace)
+          - path: /kibana(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: kibana-external
+                port:
+                  number: 5601
+
+          # ── ArgoCD ─────────────────────────────────────────────────────────
+          # Routes /argocd/* → ArgoCD Server service (argocd namespace)
+          - path: /argocd(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: argocd-external
+                port:
+                  number: 80

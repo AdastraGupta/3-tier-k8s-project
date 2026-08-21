@@ -9,44 +9,47 @@ graph TB
     User["🌐 User / Browser"]
     GitHub["📦 GitHub Repository\n(AdastraGupta/3-tier-k8s-project · main)"]
     Teams["📣 Microsoft Teams\n(CI/CD · GitOps · Alertmanager)"]
+    DevOps["🔐 DevOps / VPN / SSM\n(Internal Tools Access)"]
 
     subgraph "AWS Cloud — us-east-1"
-        ING_ELB["☁️ AWS Elastic Load Balancer\n(nginx Ingress Controller · port 80)"]
+        PUB_NLB["☁️ Public AWS NLB\n(nginx-public · internet-facing)\n→ Frontend & Backend API"]
+        INT_NLB["🔒 Internal AWS NLB\n(nginx-internal · VPC-only)\n→ Grafana · Kibana · ArgoCD"]
 
         subgraph "Amazon EKS Cluster (v1.30 · 2× t3.medium)"
+
+            subgraph "ingress-nginx Namespace"
+                ING_PUB["nginx-public Controller\n(ingressClassName: nginx-public)"]
+                ING_INT["nginx-internal Controller\n(ingressClassName: nginx-internal)"]
+            end
+
             subgraph "argocd Namespace"
-                ArgoCD["🔄 ArgoCD Server\n(GitOps Controller · v2.11.3)"]
+                ArgoCD["🔄 ArgoCD Server\n(GitOps Controller · v2.11.3)\n(ClusterIP)"]
                 ArgoNotif["🔔 ArgoCD Notifications\n(sync · health alerts)"]
             end
 
             subgraph "taskmanager Namespace"
                 direction TB
                 TM_NS["📁 All k8s/ Manifests Applied\n(Namespace · Secrets · ConfigMaps\nDeployments · Services · Ingress)"]
-                subgraph "Ingress Layer"
-                    ING["nginx Ingress Controller\n(path-based routing)"]
+                subgraph "Ingress"
+                    ING["ingress.yaml\n(ingressClassName: nginx-public)"]
                 end
-
                 subgraph "Frontend Tier"
                     FD["Frontend Pod\n(nginx:alpine)\n3 replicas · port 80"]
                     FS["frontend-svc\n(ClusterIP :80)"]
                 end
-
                 subgraph "Backend Tier"
                     BD["Backend Pod\n(postgrest/postgrest:v12.2.3)\n2 replicas · port 3000"]
                     BS["backend-svc\n(ClusterIP :3000)"]
                 end
-
                 subgraph "Database Layer"
                     PS["postgres-svc\n(ExternalName → RDS)"]
                 end
-
                 CM["ConfigMap + Secret\n(PGRST config · DB credentials)"]
             end
 
             subgraph "monitoring Namespace"
                 PROM["📊 Prometheus 2.53\n(StatefulSet · 10Gi EBS gp3 TSDB)"]
-                GRAF["📈 Grafana 11.1\n(Deployment · NLB port 80)"]
-                GRAF_NLB["Grafana LoadBalancer\n(AWS NLB · port 80)"]
+                GRAF["📈 Grafana 11.1\n(Deployment · ClusterIP)\n/grafana path"]
                 ALERT["🚨 Alertmanager 0.27\n(Deployment · 5Gi EBS gp3)"]
                 NE["node-exporter\n(DaemonSet · host metrics)"]
                 KSM["kube-state-metrics\n(Deployment · K8s metrics)"]
@@ -59,8 +62,7 @@ graph TB
             subgraph "logging Namespace"
                 ES["Elasticsearch 8.15\n(StatefulSet · 10Gi EBS gp3)"]
                 FB["Fluent Bit 3.1\n(DaemonSet · 1 per node)"]
-                KB["Kibana 8.15\n(Deployment · port 5601)"]
-                KB_ELB["Kibana LoadBalancer\n(AWS ELB · port 5601)"]
+                KB["Kibana 8.15\n(Deployment · ClusterIP)\n/kibana path"]
             end
         end
 
@@ -71,22 +73,27 @@ graph TB
         end
     end
 
-    %% GitOps flow — ArgoCD syncs k8s/ dir to cluster
+    %% GitOps flow
     GitHub -->|"git push → auto-sync"| ArgoCD
-    ArgoCD -->|"kubectl apply k8s/ (all manifests)"| TM_NS
+    ArgoCD -->|"kubectl apply k8s/"| TM_NS
     ArgoCD --> ArgoNotif
     ArgoNotif -->|"sync/health events"| Teams
-
-    %% CI/CD GitHub Actions → Teams
     GitHub -.->|"Plan/Apply/Destroy events"| Teams
 
-    %% User traffic — single entry point via nginx Ingress ELB
-    User -->|"HTTP :80"| ING_ELB
-    ING_ELB -->|TCP| ING
-    ING -->|"/ → frontend"| FS
-    ING -->|"/api → backend"| BS
+    %% PUBLIC path: User → Public NLB → nginx-public → App
+    User -->|"HTTP :80 (internet)"| PUB_NLB
+    PUB_NLB --> ING_PUB
+    ING_PUB -->|"/ → frontend"| FS
+    ING_PUB -->|"/api → backend"| BS
     FS --> FD
     BS --> BD
+
+    %% INTERNAL path: DevOps → Internal NLB → nginx-internal → Admin Tools
+    DevOps -->|"VPN / SSM / port-forward"| INT_NLB
+    INT_NLB --> ING_INT
+    ING_INT -->|"/grafana"| GRAF
+    ING_INT -->|"/kibana"| KB
+    ING_INT -->|"/argocd"| ArgoCD
 
     %% Backend → DB
     BD -->|"PGRST_DB_URI (TCP :5432)"| PS
@@ -99,34 +106,38 @@ graph TB
     %% Prometheus Monitoring Stack
     NE -.->|"node metrics"| PROM
     KSM -.->|"k8s state metrics"| PROM
-    BD -.->|"POST /metrics (port 3000)"| PROM
+    BD -.->|"/metrics (port 3000)"| PROM
     FD -.->|"container metrics"| PROM
     PROM -->|"query API"| GRAF
     PROM -->|"alert rules"| ALERT
     ALERT -->|"webhook POST"| Teams
-    GRAF_NLB -->|"TCP :80"| GRAF
-    User -->|"HTTP :80"| GRAF_NLB
 
     %% CloudWatch Observability
     BD -.-|"Prometheus /metrics"| CWAgent
     CWAgent -->|"EMF Logs"| CWLogs
     CWLogs --> CWDash
 
-    %% EFK Logging — Fluent Bit collects all container logs
+    %% EFK Logging
     FD -.-|"stdout/stderr"| FB
     BD -.-|"stdout/stderr"| FB
     FB -->|"HTTP bulk insert"| ES
     ES -->|"query API"| KB
-    KB_ELB -->|"TCP :5601"| KB
-    User -->|"HTTP :5601"| KB_ELB
 
-    %% Styles — Application
+    %% Styles — External Actors
     style User fill:#4FC3F7,stroke:#0277BD,color:#000
+    style DevOps fill:#7B68EE,stroke:#4B0082,color:#fff
     style GitHub fill:#24292E,stroke:#586069,color:#fff
     style Teams fill:#6264A7,stroke:#464775,color:#fff
-    style ING_ELB fill:#FF9900,stroke:#232F3E,color:#000
+    %% Styles — Load Balancers
+    style PUB_NLB fill:#FF9900,stroke:#232F3E,color:#000
+    style INT_NLB fill:#5C6BC0,stroke:#283593,color:#fff
+    %% Styles — Ingress Controllers
+    style ING_PUB fill:#326CE5,stroke:#1A4DB5,color:#fff
+    style ING_INT fill:#283593,stroke:#1A237E,color:#fff
+    %% Styles — ArgoCD
     style ArgoCD fill:#EF7B4D,stroke:#C04A1A,color:#fff
     style ArgoNotif fill:#F4A261,stroke:#C04A1A,color:#000
+    %% Styles — App
     style TM_NS fill:#37474F,stroke:#546E7A,color:#fff
     style ING fill:#326CE5,stroke:#1A4DB5,color:#fff
     style FD fill:#66BB6A,stroke:#2E7D32,color:#000
@@ -136,10 +147,9 @@ graph TB
     style PS fill:#CE93D8,stroke:#6A1B9A,color:#000
     style CM fill:#78909C,stroke:#37474F,color:#fff
     style RDS fill:#EF5350,stroke:#B71C1C,color:#fff
-    %% Styles — Monitoring Stack
+    %% Styles — Monitoring
     style PROM fill:#E6522C,stroke:#B13A1E,color:#fff
     style GRAF fill:#F5A623,stroke:#C07D10,color:#000
-    style GRAF_NLB fill:#FF9900,stroke:#232F3E,color:#000
     style ALERT fill:#D63B25,stroke:#9B2A1C,color:#fff
     style NE fill:#E6522C,stroke:#B13A1E,color:#fff
     style KSM fill:#E6522C,stroke:#B13A1E,color:#fff
@@ -151,7 +161,6 @@ graph TB
     style ES fill:#005571,stroke:#003A4D,color:#fff
     style FB fill:#49BDA5,stroke:#2D8F7B,color:#000
     style KB fill:#E8478B,stroke:#C12D6B,color:#fff
-    style KB_ELB fill:#FF9900,stroke:#232F3E,color:#000
 ```
 
 ## Tech Stack

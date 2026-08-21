@@ -316,9 +316,10 @@ resource "helm_release" "fluent_bit" {
 
 # ── Kibana ────────────────────────────────────────────────────────────────────
 # Log visualization and exploration UI.
-# Exposed via AWS LoadBalancer on port 5601.
+# Exposed via the INTERNAL Ingress Controller (nginx-internal) at /kibana.
 #
-# Access: http://<ELB-HOSTNAME>:5601
+# Access: http://<INTERNAL-NLB-IP>/kibana (requires VPN or kubectl port-forward)
+# Service type is ClusterIP — no direct public exposure.
 resource "helm_release" "kibana" {
   count = var.efk_enabled ? 1 : 0
 
@@ -363,20 +364,11 @@ resource "helm_release" "kibana" {
     value = "1Gi"
   }
 
-  # ── Service: LoadBalancer (AWS ELB on port 5601) ─────────────────────────
+  # ── Service: ClusterIP (routed via nginx-internal Ingress) ──────────────────
+  # No direct AWS Load Balancer — traffic arrives via the internal Ingress Controller.
   set {
     name  = "service.type"
-    value = "LoadBalancer"
-  }
-
-  set {
-    name  = "service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-type"
-    value = "classic"
-  }
-
-  set {
-    name  = "service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-scheme"
-    value = "internet-facing"
+    value = "ClusterIP"
   }
 
   # ── Health check ─────────────────────────────────────────────────────────

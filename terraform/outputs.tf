@@ -102,9 +102,19 @@ output "cloudwatch_dashboard_url" {
 
 # ─── EFK Logging Stack (Helm) ──────────────────────────────────────────────────
 
-output "kibana_access_command" {
-  description = "Command to get the Kibana LoadBalancer URL. Wait ~2 minutes for AWS to provision the ELB."
-  value       = var.efk_enabled ? "kubectl get svc kibana-kibana -n logging -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'" : "EFK stack is disabled (efk_enabled = false)"
+output "public_lb_url_command" {
+  description = "Get the Public NLB hostname for frontend + backend API access."
+  value       = "kubectl get svc nginx-public-ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'"
+}
+
+output "internal_lb_url_command" {
+  description = "Get the Internal NLB hostname for Grafana, Kibana, ArgoCD (VPC-only, not publicly reachable)."
+  value       = "kubectl get svc nginx-internal-ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'"
+}
+
+output "kibana_access_info" {
+  description = "Kibana is now served via the internal NLB at /kibana. Access via VPN or port-forward."
+  value       = var.efk_enabled ? "kubectl port-forward svc/nginx-internal-ingress-nginx-controller 8080:80 -n ingress-nginx  # then open http://localhost:8080/kibana" : "EFK stack is disabled (efk_enabled = false)"
 }
 
 output "efk_status_command" {
@@ -125,8 +135,8 @@ output "efk_helm_releases" {
 # ─── Prometheus + Grafana Monitoring (Helm) ───────────────────────────────────
 
 output "grafana_access_command" {
-  description = "Command to get the Grafana LoadBalancer URL. Wait ~2 minutes for AWS to provision the NLB."
-  value       = var.monitoring_enabled ? "kubectl get svc kube-prometheus-stack-grafana -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'" : "Monitoring stack is disabled (monitoring_enabled = false)"
+  description = "Grafana is now served via the internal NLB at /grafana. Access via VPN or port-forward."
+  value       = var.monitoring_enabled ? "kubectl port-forward svc/nginx-internal-ingress-nginx-controller 8080:80 -n ingress-nginx  # then open http://localhost:8080/grafana" : "Monitoring stack is disabled (monitoring_enabled = false)"
 }
 
 output "grafana_admin_password" {
