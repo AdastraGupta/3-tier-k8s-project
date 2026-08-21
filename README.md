@@ -6,63 +6,64 @@ A production-grade, cloud-native **3-tier task manager** application deployed on
 
 ```mermaid
 graph TB
-    User["🌐 User / Browser"]
+    User["🌐 User / Public Browser"]
     GitHub["📦 GitHub Repository\n(AdastraGupta/3-tier-k8s-project · main)"]
     Teams["📣 Microsoft Teams\n(CI/CD · GitOps · Alertmanager)"]
-    DevOps["🔐 DevOps / VPN / SSM\n(Internal Tools Access)"]
+    DevOps["🔐 DevOps / SRE / VPN\n(Internal Tools Access)"]
 
     subgraph "AWS Cloud — us-east-1"
-        PUB_NLB["☁️ Public AWS NLB\n(nginx-public · internet-facing)\n→ Frontend & Backend API"]
-        INT_NLB["🔒 Internal AWS NLB\n(nginx-internal · VPC-only)\n→ Grafana · Kibana · ArgoCD"]
+
+        subgraph "Dual Load Balancer Layer"
+            PUB_NLB["☁️ Public AWS NLB\n(nginx-public · internet-facing)\n→ Public App Traffic"]
+            INT_NLB["🔒 Internal AWS NLB\n(nginx-internal · VPC-only CIDR)\n→ Internal Observability & GitOps"]
+        end
 
         subgraph "Amazon EKS Cluster (v1.30 · 2× t3.medium)"
 
-            subgraph "ingress-nginx Namespace"
+            subgraph "ingress-nginx Namespace (Dual Ingress Controllers)"
                 ING_PUB["nginx-public Controller\n(ingressClassName: nginx-public)"]
                 ING_INT["nginx-internal Controller\n(ingressClassName: nginx-internal)"]
+                INT_ING_RES["ingress-internal.yaml\n(ExternalName proxies)"]
             end
 
-            subgraph "argocd Namespace"
-                ArgoCD["🔄 ArgoCD Server\n(GitOps Controller · v2.11.3)\n(ClusterIP)"]
-                ArgoNotif["🔔 ArgoCD Notifications\n(sync · health alerts)"]
+            subgraph "argocd Namespace (Helm: argo/argo-cd)"
+                ArgoCD["🔄 ArgoCD Server\n(GitOps Controller v2.12 · ClusterIP)\nSubpath: /argocd"]
+                ArgoNotif["🔔 ArgoCD Notifications\n(MS Teams webhook triggers)"]
             end
 
-            subgraph "taskmanager Namespace"
+            subgraph "taskmanager Namespace (Application Tier)"
                 direction TB
-                TM_NS["📁 All k8s/ Manifests Applied\n(Namespace · Secrets · ConfigMaps\nDeployments · Services · Ingress)"]
-                subgraph "Ingress"
-                    ING["ingress.yaml\n(ingressClassName: nginx-public)"]
-                end
+                TM_ING["ingress.yaml\n(nginx-public: / and /api)"]
                 subgraph "Frontend Tier"
-                    FD["Frontend Pod\n(nginx:alpine)\n3 replicas · port 80"]
+                    FD["Frontend Pods\n(nginx:alpine)\n3 replicas · port 80"]
                     FS["frontend-svc\n(ClusterIP :80)"]
                 end
                 subgraph "Backend Tier"
-                    BD["Backend Pod\n(postgrest/postgrest:v12.2.3)\n2 replicas · port 3000"]
+                    BD["Backend Pods\n(postgrest/postgrest:v12.2.3)\n2 replicas · port 3000"]
                     BS["backend-svc\n(ClusterIP :3000)"]
                 end
-                subgraph "Database Layer"
+                subgraph "Database Access"
                     PS["postgres-svc\n(ExternalName → RDS)"]
                 end
-                CM["ConfigMap + Secret\n(PGRST config · DB credentials)"]
+                CM["ConfigMaps & Secrets\n(PGRST config · DB credentials)"]
             end
 
-            subgraph "monitoring Namespace"
+            subgraph "monitoring Namespace (Helm: kube-prometheus-stack)"
                 PROM["📊 Prometheus 2.53\n(StatefulSet · 10Gi EBS gp3 TSDB)"]
-                GRAF["📈 Grafana 11.1\n(Deployment · ClusterIP)\n/grafana path"]
+                GRAF["📈 Grafana 11.1\n(Deployment · ClusterIP)\nSubpath: /grafana"]
                 ALERT["🚨 Alertmanager 0.27\n(Deployment · 5Gi EBS gp3)"]
-                NE["node-exporter\n(DaemonSet · host metrics)"]
-                KSM["kube-state-metrics\n(Deployment · K8s metrics)"]
+                NE["node-exporter\n(DaemonSet · Host Telemetry)"]
+                KSM["kube-state-metrics\n(Deployment · K8s Objects)"]
             end
 
             subgraph "amazon-cloudwatch Namespace"
-                CWAgent["CloudWatch Agent DaemonSet\n(Prometheus Scraper)"]
+                CWAgent["CloudWatch Agent DaemonSet\n(Prometheus EMF Scraper)"]
             end
 
-            subgraph "logging Namespace"
+            subgraph "logging Namespace (Helm: EFK Stack)"
                 ES["Elasticsearch 8.15\n(StatefulSet · 10Gi EBS gp3)"]
-                FB["Fluent Bit 3.1\n(DaemonSet · 1 per node)"]
-                KB["Kibana 8.15\n(Deployment · ClusterIP)\n/kibana path"]
+                FB["Fluent Bit 3.1\n(DaemonSet · Log Collector)"]
+                KB["Kibana 8.15\n(Deployment · ClusterIP)\nSubpath: /kibana"]
             end
         end
 
@@ -73,73 +74,80 @@ graph TB
         end
     end
 
-    %% GitOps flow
-    GitHub -->|"git push → auto-sync"| ArgoCD
-    ArgoCD -->|"kubectl apply k8s/"| TM_NS
+    %% GitOps Continuous Delivery flow
+    GitHub -->|"git push to main"| ArgoCD
+    ArgoCD -->|"auto-sync manifests"| TM_ING
+    ArgoCD -->|"auto-sync manifests"| FS
+    ArgoCD -->|"auto-sync manifests"| BS
     ArgoCD --> ArgoNotif
-    ArgoNotif -->|"sync/health events"| Teams
-    GitHub -.->|"Plan/Apply/Destroy events"| Teams
+    ArgoNotif -->|"Sync / Health Alerts (Webhook)"| Teams
+    GitHub -.->|"CI/CD Plan / Apply / Destroy Alerts"| Teams
 
-    %% PUBLIC path: User → Public NLB → nginx-public → App
-    User -->|"HTTP :80 (internet)"| PUB_NLB
+    %% 🌐 PUBLIC TRAFFIC FLOW: User → Public NLB → nginx-public → Frontend/Backend
+    User -->|"HTTP :80 (Public Internet)"| PUB_NLB
     PUB_NLB --> ING_PUB
-    ING_PUB -->|"/ → frontend"| FS
-    ING_PUB -->|"/api → backend"| BS
+    ING_PUB -->|"Path: / (Frontend UI)"| FS
+    ING_PUB -->|"Path: /api (REST API)"| BS
     FS --> FD
     BS --> BD
 
-    %% INTERNAL path: DevOps → Internal NLB → nginx-internal → Admin Tools
-    DevOps -->|"VPN / SSM / port-forward"| INT_NLB
+    %% 🔒 INTERNAL TRAFFIC FLOW: DevOps → Internal NLB → nginx-internal → Tools
+    DevOps -->|"VPN / SSM / Port-Forward"| INT_NLB
     INT_NLB --> ING_INT
-    ING_INT -->|"/grafana"| GRAF
-    ING_INT -->|"/kibana"| KB
-    ING_INT -->|"/argocd"| ArgoCD
+    ING_INT --> INT_ING_RES
+    INT_ING_RES -->|"Path: /grafana"| GRAF
+    INT_ING_RES -->|"Path: /kibana"| KB
+    INT_ING_RES -->|"Path: /argocd"| ArgoCD
 
-    %% Backend → DB
-    BD -->|"PGRST_DB_URI (TCP :5432)"| PS
-    PS -->|"DNS ExternalName"| RDS
+    %% Application Backend → Database
+    BD -->|"PGRST_DB_URI (Port 5432)"| PS
+    PS -->|"ExternalName DNS"| RDS
 
-    %% Config injection
-    CM -.->|"env vars"| FD
-    CM -.->|"env vars"| BD
+    %% Configuration & Secrets Injection
+    CM -.->|"Environment variables"| FD
+    CM -.->|"Environment variables"| BD
 
-    %% Prometheus Monitoring Stack
-    NE -.->|"node metrics"| PROM
-    KSM -.->|"k8s state metrics"| PROM
-    BD -.->|"/metrics (port 3000)"| PROM
-    FD -.->|"container metrics"| PROM
-    PROM -->|"query API"| GRAF
-    PROM -->|"alert rules"| ALERT
-    ALERT -->|"webhook POST"| Teams
+    %% Prometheus Metrics Collection & Alerting
+    NE -.->|"Node hardware metrics"| PROM
+    KSM -.->|"Kubernetes object states"| PROM
+    BD -.->|"PostgREST metrics (/metrics)"| PROM
+    FD -.->|"Container metrics"| PROM
+    PROM -->|"PromQL query API"| GRAF
+    PROM -->|"Alerting rules evaluation"| ALERT
+    ALERT -->|"Firing / Resolved alerts (Webhook)"| Teams
 
-    %% CloudWatch Observability
+    %% AWS CloudWatch Embedded Metric Format (EMF)
     BD -.-|"Prometheus /metrics"| CWAgent
-    CWAgent -->|"EMF Logs"| CWLogs
+    CWAgent -->|"EMF Structured Logs"| CWLogs
     CWLogs --> CWDash
 
-    %% EFK Logging
-    FD -.-|"stdout/stderr"| FB
-    BD -.-|"stdout/stderr"| FB
-    FB -->|"HTTP bulk insert"| ES
-    ES -->|"query API"| KB
+    %% Centralized Logging (EFK)
+    FD -.-|"stdout / stderr"| FB
+    BD -.-|"stdout / stderr"| FB
+    FB -->|"HTTP Bulk Ingestion"| ES
+    ES -->|"Search & Query API"| KB
 
     %% Styles — External Actors
     style User fill:#4FC3F7,stroke:#0277BD,color:#000
     style DevOps fill:#7B68EE,stroke:#4B0082,color:#fff
     style GitHub fill:#24292E,stroke:#586069,color:#fff
     style Teams fill:#6264A7,stroke:#464775,color:#fff
+
     %% Styles — Load Balancers
     style PUB_NLB fill:#FF9900,stroke:#232F3E,color:#000
     style INT_NLB fill:#5C6BC0,stroke:#283593,color:#fff
+
     %% Styles — Ingress Controllers
     style ING_PUB fill:#326CE5,stroke:#1A4DB5,color:#fff
     style ING_INT fill:#283593,stroke:#1A237E,color:#fff
-    %% Styles — ArgoCD
+    style INT_ING_RES fill:#3F51B5,stroke:#1A237E,color:#fff
+
+    %% Styles — ArgoCD GitOps
     style ArgoCD fill:#EF7B4D,stroke:#C04A1A,color:#fff
     style ArgoNotif fill:#F4A261,stroke:#C04A1A,color:#000
-    %% Styles — App
-    style TM_NS fill:#37474F,stroke:#546E7A,color:#fff
-    style ING fill:#326CE5,stroke:#1A4DB5,color:#fff
+
+    %% Styles — App Workloads
+    style TM_ING fill:#326CE5,stroke:#1A4DB5,color:#fff
     style FD fill:#66BB6A,stroke:#2E7D32,color:#000
     style FS fill:#A5D6A7,stroke:#2E7D32,color:#000
     style BD fill:#FFA726,stroke:#E65100,color:#000
@@ -147,21 +155,40 @@ graph TB
     style PS fill:#CE93D8,stroke:#6A1B9A,color:#000
     style CM fill:#78909C,stroke:#37474F,color:#fff
     style RDS fill:#EF5350,stroke:#B71C1C,color:#fff
-    %% Styles — Monitoring
+
+    %% Styles — Observability & Monitoring
     style PROM fill:#E6522C,stroke:#B13A1E,color:#fff
     style GRAF fill:#F5A623,stroke:#C07D10,color:#000
     style ALERT fill:#D63B25,stroke:#9B2A1C,color:#fff
     style NE fill:#E6522C,stroke:#B13A1E,color:#fff
     style KSM fill:#E6522C,stroke:#B13A1E,color:#fff
+
     %% Styles — CloudWatch
     style CWAgent fill:#FF9900,stroke:#232F3E,color:#fff
     style CWLogs fill:#FFE0B2,stroke:#E65100,color:#000
     style CWDash fill:#FF9900,stroke:#232F3E,color:#000
-    %% Styles — EFK
+
+    %% Styles — Centralized Logging
     style ES fill:#005571,stroke:#003A4D,color:#fff
     style FB fill:#49BDA5,stroke:#2D8F7B,color:#000
     style KB fill:#E8478B,stroke:#C12D6B,color:#fff
 ```
+
+### Architecture Highlights
+
+1. **Dual Ingress Segmentation (Split-Horizon):**
+   - **Public NLB (`nginx-public`)**: Internet-facing load balancer serving the Frontend UI (`/`) and PostgREST backend API (`/api`).
+   - **Internal NLB (`nginx-internal`)**: Private VPC load balancer with zero public attack surface, serving **Grafana** (`/grafana`), **Kibana** (`/kibana`), and **ArgoCD** (`/argocd`).
+2. **Automated GitOps Engine (ArgoCD via Helm):**
+   - Fully provisioned by Terraform. Automatically synchronizes `k8s/` manifests from GitHub into the `taskmanager` namespace with self-healing and auto-pruning.
+3. **Triple-Layer Alerting System (Microsoft Teams Webhook):**
+   - **CI/CD Pipeline Alerts**: GitHub Actions emits Rich Adaptive Cards for Terraform Plan, Apply, and Destroy events.
+   - **GitOps Alerts**: ArgoCD Notifications publishes real-time sync success, sync failure, and health degradation cards.
+   - **Infrastructure / Metric Alerts**: Alertmanager routes Prometheus alert rule evaluations (pod crashes, replica mismatches, node pressure) directly to Teams.
+4. **Comprehensive Observability & Logging:**
+   - **Prometheus & Grafana**: Time-series metrics collection across nodes (`node-exporter`), K8s objects (`kube-state-metrics`), and PostgREST application endpoints with persistent EBS `gp3` TSDB storage.
+   - **EFK Stack**: Distributed log aggregation via Fluent Bit DaemonSets into Elasticsearch with visualization in Kibana.
+   - **AWS CloudWatch Container Insights**: Embedded Metric Format (EMF) scraping for cloud-native metrics and alarms.
 
 ## Tech Stack
 
