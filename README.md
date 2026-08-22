@@ -27,6 +27,7 @@ graph TB
                 EXT_GRAF["grafana-external\n(ExternalName → monitoring)"]
                 EXT_KB["kibana-external\n(ExternalName → logging)"]
                 EXT_ARGO["argocd-external\n(ExternalName → argocd)"]
+                EXT_JAEGER["jaeger-external\n(ExternalName → tracing)"]
             end
 
             subgraph "argocd Namespace (Helm: argo/argo-cd)"
@@ -68,6 +69,10 @@ graph TB
                 ALERT["🚨 Alertmanager 0.27\n(Deployment · 5Gi EBS gp3)"]
                 NE["node-exporter\n(DaemonSet · Host Telemetry)"]
                 KSM["kube-state-metrics\n(Deployment · K8s Objects)"]
+            end
+
+            subgraph "tracing Namespace (Helm: Jaeger Stack)"
+                JAEGER["🔭 Jaeger Tracing\n(Query UI :16686 · OTLP :4317/:4318)\nSubpath: /jaeger"]
             end
 
             subgraph "amazon-cloudwatch Namespace"
@@ -113,9 +118,11 @@ graph TB
     INT_ING -->|"Path: /grafana"| EXT_GRAF
     INT_ING -->|"Path: /kibana"| EXT_KB
     INT_ING -->|"Path: /argocd"| EXT_ARGO
+    INT_ING -->|"Path: /jaeger"| EXT_JAEGER
     EXT_GRAF -->|"kube-prometheus-stack-grafana:80"| GRAF
     EXT_KB -->|"kibana-kibana:5601"| KB
     EXT_ARGO -->|"argocd-server:80"| ArgoCD
+    EXT_JAEGER -->|"jaeger-query:16686"| JAEGER
 
     %% Application Backend → Database
     BD -->|"PGRST_DB_URI (Port 5432)"| PS
@@ -139,6 +146,9 @@ graph TB
     PROM -->|"PromQL query API"| GRAF
     PROM -->|"Alerting rules evaluation"| ALERT
     ALERT -->|"Firing / Resolved alerts (Webhook)"| Teams
+
+    %% Distributed Tracing (Jaeger) Storage Link
+    JAEGER -->|"Bulk writes traces"| ES
 
     %% AWS CloudWatch Embedded Metric Format (EMF)
     BD -.-|"Prometheus /metrics"| CWAgent
@@ -168,6 +178,7 @@ graph TB
     style EXT_GRAF fill:#CE93D8,stroke:#6A1B9A,color:#000
     style EXT_KB fill:#CE93D8,stroke:#6A1B9A,color:#000
     style EXT_ARGO fill:#CE93D8,stroke:#6A1B9A,color:#000
+    style EXT_JAEGER fill:#CE93D8,stroke:#6A1B9A,color:#000
 
     %% Styles — ArgoCD GitOps
     style ArgoCD fill:#EF7B4D,stroke:#C04A1A,color:#fff
@@ -190,12 +201,13 @@ graph TB
     style EBS_CSI fill:#00897B,stroke:#004D40,color:#fff
     style SC_GP3 fill:#8E24AA,stroke:#4A148C,color:#fff
 
-    %% Styles — Observability & Monitoring
+    %% Styles — Observability, Monitoring & Tracing
     style PROM fill:#E6522C,stroke:#B13A1E,color:#fff
     style GRAF fill:#F5A623,stroke:#C07D10,color:#000
     style ALERT fill:#D63B25,stroke:#9B2A1C,color:#fff
     style NE fill:#E6522C,stroke:#B13A1E,color:#fff
     style KSM fill:#E6522C,stroke:#B13A1E,color:#fff
+    style JAEGER fill:#60D0E4,stroke:#2BA0B5,color:#000
 
     %% Styles — CloudWatch
     style CWAgent fill:#FF9900,stroke:#232F3E,color:#fff
@@ -212,8 +224,8 @@ graph TB
 
 1. **Dual Ingress Segmentation & Cross-Namespace `ExternalName` Proxies:**
    - **Public NLB (`nginx-public`)**: Internet-facing load balancer serving the Frontend UI (`/`) and PostgREST backend API (`/api`).
-   - **Internal NLB (`nginx-internal`)**: Private VPC load balancer serving **Grafana** (`/grafana`), **Kibana** (`/kibana`), and **ArgoCD** (`/argocd`).
-   - **Cross-Namespace ExternalName Services**: Ingress rules in `ingress-nginx` route through 3 dedicated `ExternalName` proxy services (`grafana-external`, `kibana-external`, `argocd-external`) that resolve target service FQDNs across namespaces (`monitoring`, `logging`, `argocd`).
+   - **Internal NLB (`nginx-internal`)**: Private VPC load balancer serving **Grafana** (`/grafana`), **Kibana** (`/kibana`), **ArgoCD** (`/argocd`), and **Jaeger** (`/jaeger`).
+   - **Cross-Namespace ExternalName Services**: Ingress rules in `ingress-nginx` route through dedicated `ExternalName` proxy services (`grafana-external`, `kibana-external`, `argocd-external`, `jaeger-external`) that resolve target service FQDNs across namespaces (`monitoring`, `logging`, `argocd`, `tracing`).
 2. **EKS Core Add-ons & Dynamic `gp3` Storage Layer:**
    - **AWS-Managed Add-ons**: `vpc-cni` (direct VPC IP allocation per pod), `coredns` (cluster DNS discovery), `kube-proxy` (node networking), and `aws-ebs-csi-driver` (dynamic storage provisioner).
    - **StorageClass (`gp3`)**: Configured with `volume_binding_mode = "WaitForFirstConsumer"` to ensure EBS volumes are created in the exact Availability Zone of the scheduled pod, with `allow_volume_expansion = true` and `reclaim_policy = "Retain"`. Powers persistent storage for **Elasticsearch (`10Gi`)**, **Prometheus TSDB (`10Gi`)**, and **Alertmanager (`5Gi`)**.
@@ -223,9 +235,10 @@ graph TB
    - **CI/CD Pipeline Alerts**: GitHub Actions emits Rich Adaptive Cards for Terraform Plan, Apply, and Destroy events.
    - **GitOps Alerts**: ArgoCD Notifications publishes real-time sync success, sync failure, and health degradation cards.
    - **Infrastructure / Metric Alerts**: Alertmanager routes Prometheus alert rule evaluations (pod crashes, replica mismatches, node pressure) directly to Teams.
-5. **Comprehensive Observability & Logging:**
-   - **Prometheus & Grafana**: Time-series metrics collection across nodes (`node-exporter`), K8s objects (`kube-state-metrics`), and PostgREST application endpoints with persistent EBS `gp3` TSDB storage.
-   - **EFK Stack**: Distributed log aggregation via Fluent Bit DaemonSets into Elasticsearch with visualization in Kibana.
+5. **Complete 3-Pillar Observability Stack (Metrics, Logs, Traces):**
+   - **Metrics (Prometheus & Grafana)**: Time-series metrics across nodes, Kubernetes objects, and PostgREST endpoints with persistent EBS `gp3` TSDB storage.
+   - **Logs (EFK Stack)**: Distributed log aggregation via Fluent Bit DaemonSets into Elasticsearch with visualization in Kibana.
+   - **Traces (Jaeger)**: End-to-end distributed tracing with OpenTelemetry (OTLP) span ingestion, storing trace data in Elasticsearch and visualized directly in Grafana and the Jaeger UI (`/jaeger`).
    - **AWS CloudWatch Container Insights**: Embedded Metric Format (EMF) scraping for cloud-native metrics and alarms.
 
 ## Tech Stack
@@ -242,6 +255,7 @@ graph TB
 | **CI/CD** | GitHub Actions — Terraform plan/apply pipeline with OIDC authentication |
 | **Ingress** | Dual Nginx Ingress Controllers — `nginx-public` (internet) + `nginx-internal` (VPC-only) |
 | **Metrics & Monitoring** | Prometheus 2.53 + Grafana 11.1 via `kube-prometheus-stack` (Helm-managed) |
+| **Distributed Tracing** | Jaeger 3.0 via `jaegertracing/jaeger` (Elasticsearch backend + Grafana data source) |
 | **Alerting** | Alertmanager (MS Teams webhook routing) + AWS CloudWatch Alarms |
 | **Observability (AWS)** | AWS CloudWatch (Dashboard + Container Insights + Metric Alarms) |
 | **Centralized Logging** | EFK Stack — Elasticsearch 8.15, Fluent Bit 3.1, Kibana 8.15 (Helm-managed via Terraform) |
@@ -261,18 +275,19 @@ graph TB
 │   ├── backend-service.yaml          # type: ClusterIP
 │   ├── postgres-service.yaml         # type: ExternalName → AWS RDS endpoint
 │   ├── ingress.yaml                  # Public Ingress (nginx-public: / → frontend, /api → backend)
-│   └── ingress-internal.yaml         # Internal Ingress (nginx-internal: /grafana, /kibana, /argocd)
+│   └── ingress-internal.yaml         # Internal Ingress (nginx-internal: /grafana, /kibana, /argocd, /jaeger)
 │
 └── terraform/                        # Infrastructure as Code
     ├── provider.tf                   # AWS + Kubernetes + Helm + Random provider config
-    ├── variables.tf                  # All configurable inputs (EFK, Monitoring, ArgoCD vars)
+    ├── variables.tf                  # All configurable inputs (EFK, Monitoring, ArgoCD, Tracing vars)
     ├── vpc.tf                        # VPC, public/private subnets, NAT Gateway
-    ├── eks.tf                        # EKS cluster + managed node group + EBS CSI
+    ├── eks.tf                        # EKS cluster + managed node group + EBS CSI + IRSA
     ├── rds.tf                        # RDS PostgreSQL instance + subnet/security groups
     ├── cloudwatch.tf                 # CloudWatch Log Groups, Dashboard, Metric Alarms
     ├── ingress.tf                    # Dual Nginx Ingress Controllers (nginx-public + nginx-internal)
     ├── efk.tf                        # EFK logging stack (Helm: ES + Fluent Bit + Kibana)
     ├── monitoring.tf                 # Prometheus + Grafana stack (Helm: kube-prometheus-stack)
+    ├── tracing.tf                    # Jaeger distributed tracing stack (Helm: jaegertracing/jaeger)
     ├── argocd.tf                     # ArgoCD GitOps controller (Helm: argo/argo-cd)
     └── outputs.tf                    # Key outputs (endpoints, commands, passwords)
 ├── .github/

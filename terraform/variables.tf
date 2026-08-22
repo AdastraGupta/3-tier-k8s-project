@@ -154,3 +154,11 @@ variable "argocd_enabled" {
   default     = true
 }
 
+# ─── Jaeger Distributed Tracing ───────────────────────────────────────────────
+
+variable "tracing_enabled" {
+  description = "Enable Jaeger distributed tracing stack via Helm (jaegertracing/jaeger chart)."
+  type        = bool
+  default     = true
+}
+

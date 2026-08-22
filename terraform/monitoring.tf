@@ -86,6 +86,22 @@ resource "helm_release" "kube_prometheus_stack" {
           }
         }
 
+        # Pre-configured Jaeger tracing data source for Grafana
+        additionalDataSources = [
+          {
+            name      = "Jaeger"
+            type      = "jaeger"
+            access    = "proxy"
+            url       = "http://jaeger-query.tracing.svc.cluster.local:16686/jaeger"
+            isDefault = false
+            jsonData = {
+              nodeGraph = {
+                enabled = true
+              }
+            }
+          }
+        ]
+
         resources = {
           requests = {
             cpu    = "100m"

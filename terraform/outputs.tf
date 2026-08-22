@@ -152,3 +152,15 @@ output "monitoring_helm_releases" {
   description = "Helm releases deployed for the monitoring stack."
   value       = var.monitoring_enabled ? "helm list -n monitoring" : "Monitoring stack is disabled (monitoring_enabled = false)"
 }
+
+# ─── Jaeger Distributed Tracing (Helm) ────────────────────────────────────────
+
+output "jaeger_access_command" {
+  description = "Jaeger UI is served via the internal NLB at /jaeger. Access via VPN or port-forward."
+  value       = var.tracing_enabled ? "kubectl port-forward svc/nginx-internal-ingress-nginx-controller 8080:80 -n ingress-nginx  # then open http://localhost:8080/jaeger" : "Tracing stack is disabled (tracing_enabled = false)"
+}
+
+output "tracing_status_command" {
+  description = "Command to check the health of all Jaeger tracing pods."
+  value       = var.tracing_enabled ? "kubectl get pods -n tracing" : "Tracing stack is disabled (tracing_enabled = false)"
+}

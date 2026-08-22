@@ -77,6 +77,11 @@ on:
         required: false
         type: boolean
         default: true
+      tracing_enabled:
+        description: "Deploy Jaeger distributed tracing stack via Helm?"
+        required: false
+        type: boolean
+        default: true
 
 # ── Concurrency: prevent parallel runs on the same branch ──────────────────
 concurrency:
@@ -208,6 +213,7 @@ jobs:
             -var="efk_enabled=${{ github.event.inputs.efk_enabled || 'true' }}" \
             -var="monitoring_enabled=${{ github.event.inputs.monitoring_enabled || 'true' }}" \
             -var="argocd_enabled=${{ github.event.inputs.argocd_enabled || 'true' }}" \
+            -var="tracing_enabled=${{ github.event.inputs.tracing_enabled || 'true' }}" \
             -detailed-exitcode \
             -no-color \
             -out=tfplan \
@@ -627,6 +633,7 @@ jobs:
             -var="efk_enabled=${{ github.event.inputs.efk_enabled || 'true' }}" \
             -var="monitoring_enabled=${{ github.event.inputs.monitoring_enabled || 'true' }}" \
             -var="argocd_enabled=${{ github.event.inputs.argocd_enabled || 'true' }}" \
+            -var="tracing_enabled=${{ github.event.inputs.tracing_enabled || 'true' }}" \
             -auto-approve \
             -no-color
         working-directory: ${{ env.TF_WORKING_DIR }}

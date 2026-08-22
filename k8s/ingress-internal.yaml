@@ -77,6 +77,23 @@ spec:
       targetPort: 80
 
 ---
+# ─── Jaeger ExternalName Service (cross-namespace reference) ──────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger-external
+  namespace: ingress-nginx
+  labels:
+    app: jaeger-proxy
+    tier: internal
+spec:
+  type: ExternalName
+  externalName: jaeger-query.tracing.svc.cluster.local
+  ports:
+    - port: 16686
+      targetPort: 16686
+
+---
 # ─── Internal Ingress Rules ───────────────────────────────────────────────────
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -127,3 +144,13 @@ spec:
                 name: argocd-external
                 port:
                   number: 80
+
+          # ── Jaeger Tracing ──────────────────────────────────────────────────
+          # Routes /jaeger/* → Jaeger Query UI service (tracing namespace)
+          - path: /jaeger(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: jaeger-external
+                port:
+                  number: 16686

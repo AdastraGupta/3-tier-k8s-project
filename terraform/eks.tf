@@ -31,9 +31,10 @@ module "eks" {
       most_recent = true
     }
     # EBS CSI Driver — required for dynamic EBS volume provisioning (gp3 StorageClass)
-    # Used by Elasticsearch PVCs in the EFK logging stack.
+    # Used by Elasticsearch and Prometheus PVCs.
     aws-ebs-csi-driver = {
-      most_recent = true
+      most_recent              = true
+      service_account_role_arn = module.ebs_csi_irsa_role.iam_role_arn
     }
   }
 
@@ -52,7 +53,7 @@ module "eks" {
       # Nodes run in private subnets — not exposed to the internet directly
       subnet_ids = module.vpc.private_subnets
 
-      disk_size = 3 # GB of EBS storage per node
+      disk_size = 20 # GB of EBS root storage per node
 
       labels = {
         role = "taskmanager"
@@ -63,5 +64,23 @@ module "eks" {
   # Enable IRSA (IAM Roles for Service Accounts) — allows pods to assume
   # AWS IAM roles without hardcoding credentials.
   enable_irsa = true
+}
+
+# ─── IAM Role for EBS CSI Driver (IRSA) ────────────────────────────────────────
+# Grants the ebs-csi-controller-sa ServiceAccount permissions to call the EC2 API
+# (ec2:CreateVolume, ec2:AttachVolume, ec2:DeleteVolume) using OIDC token authentication.
+module "ebs_csi_irsa_role" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "~> 5.39"
+
+  role_name_prefix      = "${var.cluster_name}-ebs-csi-"
+  attach_ebs_csi_policy = true
+
+  oidc_providers = {
+    main = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["kube-system:ebs-csi-controller-sa"]
+    }
+  }
 }
 
