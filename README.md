@@ -51,6 +51,17 @@ graph TB
                 CM["ConfigMaps & Secrets\n(app-config · app-secret)"]
             end
 
+            subgraph "kube-system Namespace (EKS Managed Add-ons)"
+                VPC_CNI["🌐 AWS VPC CNI\n(Pod IP Allocation from VPC Subnets)"]
+                COREDNS["🔎 CoreDNS\n(In-Cluster DNS & Service Discovery)"]
+                KPROXY["🔀 kube-proxy\n(Node Network & Service Routing)"]
+                EBS_CSI["💾 AWS EBS CSI Driver\n(ebs.csi.aws.com provisioner)"]
+            end
+
+            subgraph "Cluster Storage Layer"
+                SC_GP3["📦 StorageClass: gp3\n(WaitForFirstConsumer · Retain · Expansion)\n→ Dynamic EBS gp3 Provisioning"]
+            end
+
             subgraph "monitoring Namespace (Helm: kube-prometheus-stack)"
                 PROM["📊 Prometheus 2.53\n(StatefulSet · 10Gi EBS gp3 TSDB)"]
                 GRAF["📈 Grafana 11.1\n(Deployment · ClusterIP)\nSubpath: /grafana"]
@@ -114,6 +125,12 @@ graph TB
     CM -.->|"Environment variables"| FD
     CM -.->|"Environment variables"| BD
 
+    %% EKS Add-ons & Dynamic Storage Provisioning Flow
+    EBS_CSI -->|"powers provisioner"| SC_GP3
+    SC_GP3 -.->|"10Gi PVC dynamic volume"| PROM
+    SC_GP3 -.->|"5Gi PVC dynamic volume"| ALERT
+    SC_GP3 -.->|"10Gi PVC dynamic volume"| ES
+
     %% Prometheus Metrics Collection & Alerting
     NE -.->|"Node hardware metrics"| PROM
     KSM -.->|"Kubernetes object states"| PROM
@@ -166,6 +183,13 @@ graph TB
     style CM fill:#78909C,stroke:#37474F,color:#fff
     style RDS fill:#EF5350,stroke:#B71C1C,color:#fff
 
+    %% Styles — EKS Add-ons & Storage
+    style VPC_CNI fill:#00897B,stroke:#004D40,color:#fff
+    style COREDNS fill:#00897B,stroke:#004D40,color:#fff
+    style KPROXY fill:#00897B,stroke:#004D40,color:#fff
+    style EBS_CSI fill:#00897B,stroke:#004D40,color:#fff
+    style SC_GP3 fill:#8E24AA,stroke:#4A148C,color:#fff
+
     %% Styles — Observability & Monitoring
     style PROM fill:#E6522C,stroke:#B13A1E,color:#fff
     style GRAF fill:#F5A623,stroke:#C07D10,color:#000
@@ -190,13 +214,16 @@ graph TB
    - **Public NLB (`nginx-public`)**: Internet-facing load balancer serving the Frontend UI (`/`) and PostgREST backend API (`/api`).
    - **Internal NLB (`nginx-internal`)**: Private VPC load balancer serving **Grafana** (`/grafana`), **Kibana** (`/kibana`), and **ArgoCD** (`/argocd`).
    - **Cross-Namespace ExternalName Services**: Ingress rules in `ingress-nginx` route through 3 dedicated `ExternalName` proxy services (`grafana-external`, `kibana-external`, `argocd-external`) that resolve target service FQDNs across namespaces (`monitoring`, `logging`, `argocd`).
-2. **Automated GitOps Engine (ArgoCD via Helm):**
+2. **EKS Core Add-ons & Dynamic `gp3` Storage Layer:**
+   - **AWS-Managed Add-ons**: `vpc-cni` (direct VPC IP allocation per pod), `coredns` (cluster DNS discovery), `kube-proxy` (node networking), and `aws-ebs-csi-driver` (dynamic storage provisioner).
+   - **StorageClass (`gp3`)**: Configured with `volume_binding_mode = "WaitForFirstConsumer"` to ensure EBS volumes are created in the exact Availability Zone of the scheduled pod, with `allow_volume_expansion = true` and `reclaim_policy = "Retain"`. Powers persistent storage for **Elasticsearch (`10Gi`)**, **Prometheus TSDB (`10Gi`)**, and **Alertmanager (`5Gi`)**.
+3. **Automated GitOps Engine (ArgoCD via Helm):**
    - Fully provisioned by Terraform. Automatically synchronizes `k8s/` manifests from GitHub into the `taskmanager` namespace with self-healing and auto-pruning.
-3. **Triple-Layer Alerting System (Microsoft Teams Webhook):**
+4. **Triple-Layer Alerting System (Microsoft Teams Webhook):**
    - **CI/CD Pipeline Alerts**: GitHub Actions emits Rich Adaptive Cards for Terraform Plan, Apply, and Destroy events.
    - **GitOps Alerts**: ArgoCD Notifications publishes real-time sync success, sync failure, and health degradation cards.
    - **Infrastructure / Metric Alerts**: Alertmanager routes Prometheus alert rule evaluations (pod crashes, replica mismatches, node pressure) directly to Teams.
-4. **Comprehensive Observability & Logging:**
+5. **Comprehensive Observability & Logging:**
    - **Prometheus & Grafana**: Time-series metrics collection across nodes (`node-exporter`), K8s objects (`kube-state-metrics`), and PostgREST application endpoints with persistent EBS `gp3` TSDB storage.
    - **EFK Stack**: Distributed log aggregation via Fluent Bit DaemonSets into Elasticsearch with visualization in Kibana.
    - **AWS CloudWatch Container Insights**: Embedded Metric Format (EMF) scraping for cloud-native metrics and alarms.
@@ -206,6 +233,8 @@ graph TB
 | Layer | Technology |
 |---|---|
 | **Container Orchestration** | AWS EKS 1.30 (Managed Node Group, `t3.medium`) |
+| **EKS Managed Add-ons** | `vpc-cni`, `coredns`, `kube-proxy`, `aws-ebs-csi-driver` |
+| **Persistent Storage** | Kubernetes `gp3` StorageClass (`WaitForFirstConsumer`, EBS CSI provisioner) |
 | **Frontend** | Nginx serving static HTML/CSS/JS |
 | **Backend API** | [PostgREST](https://postgrest.org/) v12.2.3 — auto-generates REST API from PostgreSQL schema |
 | **Database** | AWS RDS PostgreSQL 15 (`db.t4g.micro`, Single-AZ) |
