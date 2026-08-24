@@ -72,7 +72,9 @@ graph TB
             end
 
             subgraph "tracing Namespace (Helm: Jaeger Stack)"
-                JAEGER["🔭 Jaeger Tracing\n(Query UI :16686 · OTLP :4317/:4318)\nSubpath: /jaeger"]
+                JAEGER_Q["🔭 Jaeger Query (Deployment)\n(Web UI :16686)\nSubpath: /jaeger — Reads from ES"]
+                JAEGER_C["📡 Jaeger Collector (Deployment)\n(OTLP gRPC :4317 · HTTP :4318)\nStateless — writes spans to ES"]
+                JAEGER_A["🔁 Jaeger Agent (DaemonSet)\n(per-node span batcher)\nRoutes spans → Collector"]
             end
 
             subgraph "amazon-cloudwatch Namespace"
@@ -127,7 +129,7 @@ graph TB
     EXT_GRAF -->|"kube-prometheus-stack-grafana:80"| GRAF
     EXT_KB -->|"kibana-kibana:5601"| KB
     EXT_ARGO -->|"argocd-server:80"| ArgoCD
-    EXT_JAEGER -->|"jaeger-query:16686"| JAEGER
+    EXT_JAEGER -->|"jaeger-query:16686"| JAEGER_Q
 
     %% Application Backend → Database
     BD -->|"PGRST_DB_URI (Port 5432)"| PS
@@ -152,8 +154,10 @@ graph TB
     PROM -->|"Alerting rules evaluation"| ALERT
     ALERT -->|"Firing / Resolved alerts (Webhook)"| Teams
 
-    %% Distributed Tracing (Jaeger) Storage Link
-    JAEGER -->|"Bulk writes traces"| ES
+    %% Distributed Tracing (Jaeger) — component connections
+    JAEGER_A -.->|"batches spans"| JAEGER_C
+    JAEGER_C -->|"Bulk writes traces (ES Index API)"| ES
+    JAEGER_Q -->|"Reads trace data (ES Search API)"| ES
 
     %% AWS CloudWatch Embedded Metric Format (EMF)
     BD -.-|"Prometheus /metrics"| CWAgent
@@ -219,7 +223,9 @@ graph TB
     style ALERT fill:#D63B25,stroke:#9B2A1C,color:#fff
     style NE fill:#E6522C,stroke:#B13A1E,color:#fff
     style KSM fill:#E6522C,stroke:#B13A1E,color:#fff
-    style JAEGER fill:#60D0E4,stroke:#2BA0B5,color:#000
+    style JAEGER_Q fill:#60D0E4,stroke:#2BA0B5,color:#000
+    style JAEGER_C fill:#4DB6C8,stroke:#2BA0B5,color:#000
+    style JAEGER_A fill:#80DEEA,stroke:#2BA0B5,color:#000
 
     %% Styles — CloudWatch & Bedrock
     style CWAgent fill:#FF9900,stroke:#232F3E,color:#fff
@@ -252,7 +258,7 @@ graph TB
 5. **Complete 3-Pillar Observability Stack (Metrics, Logs, Traces):**
    - **Metrics (Prometheus & Grafana)**: Time-series metrics across nodes, Kubernetes objects, and PostgREST endpoints with persistent EBS `gp3` TSDB storage.
    - **Logs (EFK Stack)**: Distributed log aggregation via Fluent Bit DaemonSets into Elasticsearch with visualization in Kibana.
-   - **Traces (Jaeger)**: End-to-end distributed tracing with OpenTelemetry (OTLP) span ingestion, storing trace data in Elasticsearch and visualized directly in Grafana and the Jaeger UI (`/jaeger`).
+   - **Traces (Jaeger)**: End-to-end distributed tracing via three distinct workloads — **Jaeger Collector** (`Deployment`, ingests OTLP spans on ports 4317/4318), **Jaeger Query UI** (`Deployment`, serves the `/jaeger` dashboard at port 16686), and **Jaeger Agent** (`DaemonSet`, per-node batcher routing spans to the Collector). All traces are persisted in Elasticsearch (not in Jaeger itself), so Jaeger components are fully stateless and do NOT require PersistentVolumes.
    - **AWS CloudWatch Container Insights**: Embedded Metric Format (EMF) scraping for cloud-native metrics and alarms.
 6. **AI-Powered SRE Automation (K8sGPT + AWS Bedrock):**
    - Autonomous Kubernetes failure detection across pods, deployments, services, ingress, PVCs, and nodes.
@@ -272,7 +278,7 @@ graph TB
 | **CI/CD** | GitHub Actions — Terraform plan/apply pipeline with OIDC authentication |
 | **Ingress** | Dual Nginx Ingress Controllers — `nginx-public` (internet) + `nginx-internal` (VPC-only) |
 | **Metrics & Monitoring** | Prometheus 2.53 + Grafana 11.1 via `kube-prometheus-stack` (Helm-managed) |
-| **Distributed Tracing** | Jaeger 3.0 via `jaegertracing/jaeger` (Elasticsearch backend + Grafana data source) |
+| **Distributed Tracing** | Jaeger 3.0 via `jaegertracing/jaeger` — Collector (`Deployment`), Query UI (`Deployment`), Agent (`DaemonSet`); traces stored in Elasticsearch |
 | **Alerting** | Alertmanager (MS Teams webhook routing) + AWS CloudWatch Alarms |
 | **Observability (AWS)** | AWS CloudWatch (Dashboard + Container Insights + Metric Alarms) |
 | **Centralized Logging** | EFK Stack — Elasticsearch 8.15, Fluent Bit 3.1, Kibana 8.15 (Helm-managed via Terraform) |
