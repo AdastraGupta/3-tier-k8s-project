@@ -82,6 +82,11 @@ on:
         required: false
         type: boolean
         default: true
+      k8sgpt_enabled:
+        description: "Deploy K8sGPT Operator (AI-powered incident triage via AWS Bedrock)?"
+        required: false
+        type: boolean
+        default: true
 
 # ── Concurrency: prevent parallel runs on the same branch ──────────────────
 concurrency:
@@ -214,6 +219,7 @@ jobs:
             -var="monitoring_enabled=${{ github.event.inputs.monitoring_enabled || 'true' }}" \
             -var="argocd_enabled=${{ github.event.inputs.argocd_enabled || 'true' }}" \
             -var="tracing_enabled=${{ github.event.inputs.tracing_enabled || 'true' }}" \
+            -var="k8sgpt_enabled=${{ github.event.inputs.k8sgpt_enabled || 'true' }}" \
             -detailed-exitcode \
             -no-color \
             -out=tfplan \
@@ -634,6 +640,7 @@ jobs:
             -var="monitoring_enabled=${{ github.event.inputs.monitoring_enabled || 'true' }}" \
             -var="argocd_enabled=${{ github.event.inputs.argocd_enabled || 'true' }}" \
             -var="tracing_enabled=${{ github.event.inputs.tracing_enabled || 'true' }}" \
+            -var="k8sgpt_enabled=${{ github.event.inputs.k8sgpt_enabled || 'true' }}" \
             -auto-approve \
             -no-color
         working-directory: ${{ env.TF_WORKING_DIR }}

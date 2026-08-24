@@ -164,3 +164,20 @@ output "tracing_status_command" {
   description = "Command to check the health of all Jaeger tracing pods."
   value       = var.tracing_enabled ? "kubectl get pods -n tracing" : "Tracing stack is disabled (tracing_enabled = false)"
 }
+
+# ─── K8sGPT — AI-Powered SRE (AWS Bedrock) ───────────────────────────────────
+
+output "k8sgpt_status_command" {
+  description = "Check K8sGPT Operator pod health, the K8sGPT CRD config, and AI scan results."
+  value       = var.k8sgpt_enabled ? "kubectl get pods,k8sgpt,results -n k8sgpt" : "K8sGPT is disabled (k8sgpt_enabled = false)"
+}
+
+output "k8sgpt_results_command" {
+  description = "View all AI-generated incident analysis results in full YAML detail."
+  value       = var.k8sgpt_enabled ? "kubectl get results -n k8sgpt -o yaml" : "K8sGPT is disabled (k8sgpt_enabled = false)"
+}
+
+output "k8sgpt_bedrock_model" {
+  description = "AWS Bedrock model currently configured for K8sGPT incident analysis."
+  value       = var.k8sgpt_enabled ? var.k8sgpt_bedrock_model : "K8sGPT is disabled (k8sgpt_enabled = false)"
+}

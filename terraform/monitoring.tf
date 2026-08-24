@@ -256,6 +256,9 @@ resource "helm_release" "kube_prometheus_stack" {
           receivers = [
             {
               name = "null"
+              # Empty webhook_configs required so both branches of the conditional
+              # have a consistent object type (Terraform type-system requirement).
+              webhook_configs = []
             }
           ]
         }

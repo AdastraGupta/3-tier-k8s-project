@@ -289,6 +289,7 @@ graph TB
     ├── monitoring.tf                 # Prometheus + Grafana stack (Helm: kube-prometheus-stack)
     ├── tracing.tf                    # Jaeger distributed tracing stack (Helm: jaegertracing/jaeger)
     ├── argocd.tf                     # ArgoCD GitOps controller (Helm: argo/argo-cd)
+    ├── k8sgpt.tf                     # K8sGPT Operator (AI-powered SRE via AWS Bedrock + IRSA)
     └── outputs.tf                    # Key outputs (endpoints, commands, passwords)
 ├── .github/
 │   └── workflows/
@@ -639,6 +640,109 @@ Alerts include:
 - `KubeNodeNotReady` — EKS worker node experiencing hardware / network failure
 - `KubeMemoryQuotaOvercommit` — Cluster running out of memory headroom
 - `PostgresBackendDown` — PostgREST backend metrics endpoint unreachable
+
+## K8sGPT — AI-Powered SRE with AWS Bedrock
+
+The **K8sGPT Operator** is deployed into the EKS cluster and acts as an automated Site Reliability Engineer (SRE). It continuously scans all Kubernetes objects, sends failure context to **AWS Bedrock (Anthropic Claude 3 Haiku)**, and returns plain-English root-cause diagnoses with exact remediation commands — eliminating the need to manually parse cryptic `kubectl describe` output.
+
+### How It Works
+
+```
++-----------------------------------------------------------+
+|                     Amazon EKS Cluster                    |
+|                                                           |
+|   Failing Pod (CrashLoopBackOff / OOMKilled)              |
+|        │                                                  |
+|        ▼                                                  |
+|   K8sGPT Operator (k8sgpt namespace)                      |
+|   - Collects pod events + error logs                      |
+|   - Anonymizes sensitive data (IPs, names, env values)    |
+|   - Calls AWS Bedrock via OIDC/IRSA (zero secrets)        |
++----------------------│------------------------------------+
+                       │  bedrock:InvokeModel
+                       ▼
+             AWS Bedrock (Claude 3 Haiku)
+             - Analyzes Kubernetes error context
+             - Returns root cause + kubectl fix
+                       │
+          ┌────────────┴───────────────┐
+          ▼                            ▼
+   kubectl get results         Microsoft Teams
+   -n k8sgpt -o yaml           (Incident alert card)
+```
+
+### Authentication (Zero Secrets via IRSA)
+
+K8sGPT authenticates to AWS Bedrock using **IAM Roles for Service Accounts (IRSA)** — the same mechanism used by the EBS CSI Driver. No API keys are stored anywhere:
+
+- `aws_iam_policy.k8sgpt_bedrock` — Grants `bedrock:InvokeModel` for Claude 3 Haiku/Sonnet only
+- `module.k8sgpt_irsa_role` — Binds the IAM role to the `k8sgpt:k8sgpt-operator` ServiceAccount via OIDC
+
+### Configuration
+
+Controlled via Terraform variables in `terraform/variables.tf`:
+
+| Variable | Default | Description |
+|---|---|---|
+| `k8sgpt_enabled` | `true` | Enable/disable the K8sGPT Operator |
+| `k8sgpt_bedrock_model` | `anthropic.claude-3-haiku-20240307-v1:0` | Bedrock model for analysis (Haiku = fast & cheap) |
+| `k8sgpt_anonymize` | `true` | Mask sensitive data before sending to Bedrock |
+
+### Objects Monitored
+
+| Kubernetes Object | What K8sGPT Detects |
+|---|---|
+| **Pod** | `CrashLoopBackOff`, `OOMKilled`, `ImagePullBackOff` |
+| **Deployment** | Unavailable replicas, rollout stuck |
+| **Service** | Missing endpoints, wrong label selectors |
+| **Ingress** | Invalid backend service references, TLS issues |
+| **PersistentVolumeClaim** | Unbound PVCs, EBS provisioning failures |
+| **Node** | `NotReady` state, disk pressure, memory pressure |
+
+### Operational Commands
+
+```bash
+# Check K8sGPT Operator pod health
+kubectl get pods,k8sgpt,results -n k8sgpt
+
+# View all AI-generated incident diagnoses
+kubectl get results -n k8sgpt -o yaml
+
+# Or via Terraform outputs after apply
+terraform output k8sgpt_status_command
+terraform output k8sgpt_results_command
+terraform output k8sgpt_bedrock_model
+```
+
+### Example AI Output
+
+When K8sGPT detects a failing pod, it creates a `Result` Custom Resource like:
+
+```yaml
+apiVersion: core.k8sgpt.ai/v1alpha1
+kind: Result
+metadata:
+  name: taskmanager-backend-crashloop
+  namespace: k8sgpt
+status:
+  details: |
+    Problem: The PostgREST backend pod is crash-looping because it cannot
+    authenticate to RDS PostgreSQL at taskmanager-cluster-postgres...:5432.
+
+    Root Cause: FATAL: password authentication failed for user postgres.
+    The PGRST_DB_URI in Kubernetes Secret 'app-secret' does not match the
+    RDS master password.
+
+    Fix:
+    kubectl create secret generic app-secret \
+      --from-literal=PGRST_DB_URI='postgres://postgres:<CORRECT_PASSWORD>@<RDS_HOST>:5432/taskdb' \
+      -n taskmanager --dry-run=client -o yaml | kubectl apply -f -
+    kubectl rollout restart deployment backend -n taskmanager
+```
+
+> [!IMPORTANT]
+> **AWS Bedrock Model Access Required (One-Time Setup):**
+> Navigate to **AWS Console → Amazon Bedrock → Model Access → Request Access** and enable **Anthropic Claude 3 Haiku** before running `terraform apply`.
 
 ## CI/CD Pipeline
 

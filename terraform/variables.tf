@@ -162,3 +162,24 @@ variable "tracing_enabled" {
   default     = true
 }
 
+# ─── K8sGPT — AI-Powered SRE Operator ────────────────────────────────────────
+
+variable "k8sgpt_enabled" {
+  description = "Enable K8sGPT Operator for AI-powered Kubernetes incident triage via AWS Bedrock."
+  type        = bool
+  default     = true
+}
+
+variable "k8sgpt_bedrock_model" {
+  description = "AWS Bedrock model ID for K8sGPT to use. Claude 3 Haiku is fast and cost-effective."
+  type        = string
+  default     = "anthropic.claude-3-haiku-20240307-v1:0"
+  # Alternative (deeper analysis, higher cost): "anthropic.claude-3-5-sonnet-20240620-v1:0"
+}
+
+variable "k8sgpt_anonymize" {
+  description = "Anonymize sensitive Kubernetes data (IPs, names, env values) before sending to Bedrock LLM."
+  type        = bool
+  default     = true
+}
+
