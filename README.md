@@ -84,12 +84,17 @@ graph TB
                 FB["Fluent Bit 3.1\n(DaemonSet · Log Collector)"]
                 KB["Kibana 8.15\n(Deployment · ClusterIP)\nSubpath: /kibana"]
             end
+
+            subgraph "k8sgpt Namespace (Helm: k8sgpt-operator)"
+                K8SGPT["🤖 K8sGPT Operator\n(AI-Powered SRE Engine)\nIRSA Role: Claude 3 Haiku"]
+            end
         end
 
         subgraph "AWS Managed Services"
             RDS["🗄️ AWS RDS PostgreSQL 15\n(db.t4g.micro · Single-AZ)\nDB: taskdb · port 5432 · sslmode=require"]
             CWLogs["CloudWatch Logs\n(/aws/containerinsights/prometheus)\n(/aws/containerinsights/performance)"]
             CWDash["CloudWatch Dashboard & Alarms\n(taskmanager-cluster-observability)\nAlarms: RDS CPU > 80% · Storage < 2 GB"]
+            Bedrock["🧠 AWS Bedrock\n(Anthropic Claude 3 Haiku)\nModel: claude-3-haiku-20240307-v1:0"]
         end
     end
 
@@ -161,6 +166,13 @@ graph TB
     FB -->|"HTTP Bulk Ingestion"| ES
     ES -->|"Search & Query API"| KB
 
+    %% AI SRE Incident Triage (K8sGPT + AWS Bedrock)
+    FD -.->|"Failure logs / CrashEvents"| K8SGPT
+    BD -.->|"Failure logs / CrashEvents"| K8SGPT
+    K8SGPT -->|"bedrock:InvokeModel (IRSA)"| Bedrock
+    Bedrock -->|"AI Root Cause & Fix Commands"| K8SGPT
+    K8SGPT -->|"AI Incident Diagnosis (Webhook)"| Teams
+
     %% Styles — External Actors
     style User fill:#4FC3F7,stroke:#0277BD,color:#000
     style DevOps fill:#7B68EE,stroke:#4B0082,color:#fff
@@ -209,15 +221,17 @@ graph TB
     style KSM fill:#E6522C,stroke:#B13A1E,color:#fff
     style JAEGER fill:#60D0E4,stroke:#2BA0B5,color:#000
 
-    %% Styles — CloudWatch
+    %% Styles — CloudWatch & Bedrock
     style CWAgent fill:#FF9900,stroke:#232F3E,color:#fff
     style CWLogs fill:#FFE0B2,stroke:#E65100,color:#000
     style CWDash fill:#FF9900,stroke:#232F3E,color:#000
+    style Bedrock fill:#FF9900,stroke:#232F3E,color:#000
 
-    %% Styles — Centralized Logging
+    %% Styles — Centralized Logging & AI SRE
     style ES fill:#005571,stroke:#003A4D,color:#fff
     style FB fill:#49BDA5,stroke:#2D8F7B,color:#000
     style KB fill:#E8478B,stroke:#C12D6B,color:#fff
+    style K8SGPT fill:#9C27B0,stroke:#6A1B9A,color:#fff
 ```
 
 ### Architecture Highlights
@@ -240,6 +254,9 @@ graph TB
    - **Logs (EFK Stack)**: Distributed log aggregation via Fluent Bit DaemonSets into Elasticsearch with visualization in Kibana.
    - **Traces (Jaeger)**: End-to-end distributed tracing with OpenTelemetry (OTLP) span ingestion, storing trace data in Elasticsearch and visualized directly in Grafana and the Jaeger UI (`/jaeger`).
    - **AWS CloudWatch Container Insights**: Embedded Metric Format (EMF) scraping for cloud-native metrics and alarms.
+6. **AI-Powered SRE Automation (K8sGPT + AWS Bedrock):**
+   - Autonomous Kubernetes failure detection across pods, deployments, services, ingress, PVCs, and nodes.
+   - Leverages **AWS Bedrock (Anthropic Claude 3 Haiku)** via **IAM Roles for Service Accounts (IRSA)** for passwordless, zero-secret authentication, delivering plain-English root causes and remediation `kubectl` commands directly to Microsoft Teams.
 
 ## Tech Stack
 
@@ -259,7 +276,9 @@ graph TB
 | **Alerting** | Alertmanager (MS Teams webhook routing) + AWS CloudWatch Alarms |
 | **Observability (AWS)** | AWS CloudWatch (Dashboard + Container Insights + Metric Alarms) |
 | **Centralized Logging** | EFK Stack — Elasticsearch 8.15, Fluent Bit 3.1, Kibana 8.15 (Helm-managed via Terraform) |
+| **AI SRE / AIOps** | K8sGPT Operator 0.2.2 + AWS Bedrock (Anthropic Claude 3 Haiku via IRSA) |
 | **Infrastructure as Code** | Terraform (S3 backend + DynamoDB state locking) |
+
 
 ## Project Structure
 
