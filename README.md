@@ -18,7 +18,7 @@ graph TB
             INT_NLB["🔒 Internal AWS NLB\n(nginx-internal · VPC-only CIDR)\n→ Internal Observability & GitOps"]
         end
 
-        subgraph "Amazon EKS Cluster (v1.30 · 2× t3.medium)"
+        subgraph "Amazon EKS Cluster (v1.30 · Dual Managed Node Groups)"
 
             subgraph "ingress-nginx Namespace (Dual Ingress Controllers)"
                 ING_PUB["nginx-public Controller\n(ingressClassName: nginx-public)"]
@@ -263,12 +263,15 @@ graph TB
 6. **AI-Powered SRE Automation (K8sGPT + AWS Bedrock):**
    - Autonomous Kubernetes failure detection across pods, deployments, services, ingress, PVCs, and nodes.
    - Leverages **AWS Bedrock (Anthropic Claude 3 Haiku)** via **IAM Roles for Service Accounts (IRSA)** for passwordless, zero-secret authentication, delivering plain-English root causes and remediation `kubectl` commands directly to Microsoft Teams.
+7. **Dual Managed Node Groups (Workload Isolation & Spot Cost Optimization):**
+   - **`system_nodes`** (`ON_DEMAND`, 2× `t3.medium`): High-reliability node group hosting Ingress controllers, ArgoCD, Prometheus, Grafana, Alertmanager, Elasticsearch, Kibana, Jaeger, and K8sGPT Operator.
+   - **`app_nodes`** (`SPOT`, 2× `t3.small`): Cost-optimized node group hosting `taskmanager` application workloads (Frontend and Backend) pinned via `nodeSelector: { nodegroup: app }`, saving ~70% on compute costs.
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| **Container Orchestration** | AWS EKS 1.30 (Managed Node Group, `t3.medium`) |
+| **Container Orchestration** | AWS EKS 1.30 (Dual Node Groups: `system_nodes` [ON_DEMAND `t3.medium`] + `app_nodes` [SPOT `t3.small`]) |
 | **EKS Managed Add-ons** | `vpc-cni`, `coredns`, `kube-proxy`, `aws-ebs-csi-driver` |
 | **Persistent Storage** | Kubernetes `gp3` StorageClass (`WaitForFirstConsumer`, EBS CSI provisioner) |
 | **Frontend** | Nginx serving static HTML/CSS/JS |
@@ -306,7 +309,7 @@ graph TB
     ├── provider.tf                   # AWS + Kubernetes + Helm + Random provider config
     ├── variables.tf                  # All configurable inputs (EFK, Monitoring, ArgoCD, Tracing vars)
     ├── vpc.tf                        # VPC, public/private subnets, NAT Gateway
-    ├── eks.tf                        # EKS cluster + managed node group + EBS CSI + IRSA
+    ├── eks.tf                        # EKS cluster + Dual Node Groups (system + app) + EBS CSI + IRSA
     ├── rds.tf                        # RDS PostgreSQL instance + subnet/security groups
     ├── cloudwatch.tf                 # CloudWatch Log Groups, Dashboard, Metric Alarms
     ├── ingress.tf                    # Dual Nginx Ingress Controllers (nginx-public + nginx-internal)
@@ -339,7 +342,7 @@ terraform apply
 ```
 
 This provisions:
-- EKS cluster (`taskmanager-cluster`) with 2× `t3.medium` worker nodes
+- EKS cluster (`taskmanager-cluster`) with **2 Dedicated Managed Node Groups** (`system_nodes` ON_DEMAND + `app_nodes` SPOT)
 - AWS RDS PostgreSQL 15 (`db.t4g.micro`)
 - VPC with public/private subnets across 2 AZs
 - CloudWatch Dashboard + Metric Alarms
@@ -458,7 +461,7 @@ kubectl port-forward svc/backend-svc 3000:3000 -n taskmanager
 | **ExternalName proxy pattern** | `ingress-internal.yaml` uses `ExternalName` services in the `ingress-nginx` namespace to reach ClusterIP services across namespaces (`monitoring`, `logging`, `argocd`) without exposing them |
 | **ArgoCD via Helm (not raw YAML)** | Zero manual `kubectl apply` steps — MS Teams notifications, app provisioning and namespace creation all automated via `terraform apply` |
 | **`sslmode=require` in DB URI** | AWS RDS enforces TLS by default; this ensures encrypted connections from PostgREST |
-| **`t3.medium` nodes** | Required for EFK stack (~2–3 GB RAM); configurable via `var.node_instance_type` |
+| **Dual Managed Node Groups** | `system_nodes` (`ON_DEMAND` `t3.medium`) for core infra/observability + `app_nodes` (`SPOT` `t3.small`) for stateless app workloads saves ~70% on compute |
 | **EFK via Helm (not raw YAML)** | Official Helm charts (elastic/elasticsearch, fluent/fluent-bit, elastic/kibana) — production-grade with upgradeable chart versions, parameterized via Terraform variables |
 
 ## CloudWatch Observability

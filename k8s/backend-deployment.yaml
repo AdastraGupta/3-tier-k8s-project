@@ -25,6 +25,9 @@ spec:
         prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: backend-sa
+      # Pin backend pods to the application node group (SPOT instances)
+      nodeSelector:
+        nodegroup: app
       containers:
         - name: postgrest
           image: postgrest/postgrest:v12.2.3

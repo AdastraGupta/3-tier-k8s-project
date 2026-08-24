@@ -77,7 +77,10 @@ resource "helm_release" "ingress_nginx_public" {
         limits   = { cpu = "500m", memory = "512Mi" }
       }
 
-      replicaCount = 1
+      # Pin Ingress controller to system_nodes
+      nodeSelector = {
+        nodegroup = "system"
+      }
 
       config = {
         use-real-ip           = "true"
@@ -132,7 +135,10 @@ resource "helm_release" "ingress_nginx_internal" {
         limits   = { cpu = "200m", memory = "256Mi" }
       }
 
-      replicaCount = 1
+      # Pin Ingress controller to system_nodes
+      nodeSelector = {
+        nodegroup = "system"
+      }
 
       # Allow cross-namespace service references (needed for Grafana/Kibana/ArgoCD
       # Ingress rules that reference services in other namespaces)

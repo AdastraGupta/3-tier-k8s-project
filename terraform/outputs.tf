@@ -15,6 +15,16 @@ output "cluster_version" {
   value       = module.eks.cluster_version
 }
 
+output "node_groups_status_command" {
+  description = "Verify both system_nodes and app_nodes are Ready and correctly labelled."
+  value       = "kubectl get nodes -L nodegroup,role,kubernetes.io/arch --sort-by=.metadata.labels.nodegroup"
+}
+
+output "workload_placement_command" {
+  description = "Show which node group each pod is scheduled on across all namespaces."
+  value       = "kubectl get pods -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,NODE:.spec.nodeName' --sort-by=.metadata.namespace"
+}
+
 # ─── Networking ────────────────────────────────────────────────────────────────
 
 output "vpc_id" {

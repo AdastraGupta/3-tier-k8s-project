@@ -52,30 +52,72 @@ variable "kubernetes_version" {
   default     = "1.30"
 }
 
-# ─── Node Group ────────────────────────────────────────────────────────────────
+# ─── Node Group 1: System / Infrastructure (ON_DEMAND) ───────────────────────
+# Runs: Ingress-nginx, ArgoCD, Prometheus, Grafana, EFK, Jaeger, K8sGPT
+# Uses ON_DEMAND for 100% availability of core platform services.
 
-variable "node_instance_type" {
-  description = "EC2 instance type for the EKS managed node group."
+variable "system_node_instance_type" {
+  description = "EC2 instance type for the system node group. Needs ≥ 4GB RAM for Elasticsearch + Prometheus."
   type        = string
-  default     = "t3.medium" # 2 vCPU, 4GB RAM — required for EFK stack (ES needs ~1-2GB)
+  default     = "t3.medium" # 2 vCPU, 4 GB RAM
 }
 
-variable "node_min_size" {
-  description = "Minimum number of nodes in the managed node group."
+variable "system_node_capacity_type" {
+  description = "Capacity type for system nodes: ON_DEMAND (high reliability) or SPOT."
+  type        = string
+  default     = "ON_DEMAND"
+}
+
+variable "system_node_min_size" {
+  description = "Minimum number of nodes in the system node group."
   type        = number
   default     = 1
 }
 
-variable "node_max_size" {
-  description = "Maximum number of nodes in the managed node group."
+variable "system_node_max_size" {
+  description = "Maximum number of nodes in the system node group."
   type        = number
   default     = 3
 }
 
-variable "node_desired_size" {
-  description = "Desired number of nodes in the managed node group."
+variable "system_node_desired_size" {
+  description = "Desired (initial) number of nodes in the system node group."
   type        = number
-  default     = 2 # 2 nodes required for EKS ENI pod capacity (maxPods limit)
+  default     = 2
+}
+
+# ─── Node Group 2: Application Workloads (SPOT) ───────────────────────────────
+# Runs: frontend (Nginx) and backend (PostgREST) pods only.
+# Uses SPOT for ~70% EC2 cost savings — safe because pods are stateless.
+
+variable "app_node_instance_type" {
+  description = "EC2 instance type for the application node group. t3.small is sufficient for stateless frontend/backend pods."
+  type        = string
+  default     = "t3.small" # 2 vCPU, 2 GB RAM
+}
+
+variable "app_node_capacity_type" {
+  description = "Capacity type for app nodes: SPOT (cost-optimised) or ON_DEMAND."
+  type        = string
+  default     = "SPOT"
+}
+
+variable "app_node_min_size" {
+  description = "Minimum number of nodes in the application node group."
+  type        = number
+  default     = 1
+}
+
+variable "app_node_max_size" {
+  description = "Maximum number of nodes in the application node group."
+  type        = number
+  default     = 4
+}
+
+variable "app_node_desired_size" {
+  description = "Desired (initial) number of nodes in the application node group."
+  type        = number
+  default     = 2
 }
 
 # ─── EFK Logging Stack ─────────────────────────────────────────────────────────

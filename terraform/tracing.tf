@@ -48,6 +48,11 @@ resource "helm_release" "jaeger" {
       # Serve behind /jaeger subpath for internal Ingress routing
       extraArgs = ["--query.base-path=/jaeger"]
 
+      # Pin to system_nodes
+      nodeSelector = {
+        nodegroup = "system"
+      }
+
       resources = {
         requests = { cpu = "50m", memory = "64Mi" }
         limits   = { cpu = "200m", memory = "256Mi" }
@@ -62,6 +67,12 @@ resource "helm_release" "jaeger" {
           http = { port = 4318 }
         }
       }
+
+      # Pin to system_nodes
+      nodeSelector = {
+        nodegroup = "system"
+      }
+
       resources = {
         requests = { cpu = "50m", memory = "128Mi" }
         limits   = { cpu = "300m", memory = "512Mi" }

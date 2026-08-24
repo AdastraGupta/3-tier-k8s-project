@@ -100,10 +100,16 @@ resource "helm_release" "k8sgpt_operator" {
   timeout          = 300
   wait             = true
 
-  set {
-    name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
-    value = module.k8sgpt_irsa_role[0].iam_role_arn
-  }
+  values = [yamlencode({
+    serviceAccount = {
+      annotations = {
+        "eks.amazonaws.com/role-arn" = module.k8sgpt_irsa_role[0].iam_role_arn
+      }
+    }
+    nodeSelector = {
+      nodegroup = "system"
+    }
+  })]
 
   depends_on = [
     module.eks,

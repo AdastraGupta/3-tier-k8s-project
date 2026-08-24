@@ -38,25 +38,54 @@ module "eks" {
     }
   }
 
-  # ─── Managed Node Group ───────────────────────────────────────────────────────
-  # AWS fully manages the lifecycle of these EC2 nodes (patching, replacement, etc.)
-  # Configured to use SPOT instances for ~70% cost savings compared to On-Demand.
+  # ─── Managed Node Groups (Dual Node Group Architecture) ──────────────────────
+  # Two dedicated node groups separate infrastructure from application workloads:
+  #
+  #  system_nodes  ON_DEMAND  t3.medium  → Ingress, ArgoCD, Monitoring, EFK, Jaeger, K8sGPT
+  #  app_nodes     SPOT       t3.small   → frontend (Nginx) + backend (PostgREST) pods only
+  #
+  # Pods are pinned to their node group via nodeSelector:
+  #   nodegroup: system  (for all Helm-managed infrastructure)
+  #   nodegroup: app     (for taskmanager namespace deployments)
   eks_managed_node_groups = {
-    taskmanager_nodes = {
+
+    # ── Group 1: System / Infrastructure (ON_DEMAND) ────────────────────────
+    system_nodes = {
       ami_type       = "AL2_x86_64"
-      instance_types = [var.node_instance_type]
+      instance_types = [var.system_node_instance_type]
+      capacity_type  = var.system_node_capacity_type
 
-      min_size     = var.node_min_size
-      max_size     = var.node_max_size
-      desired_size = var.node_desired_size
+      min_size     = var.system_node_min_size
+      max_size     = var.system_node_max_size
+      desired_size = var.system_node_desired_size
 
-      # Nodes run in private subnets — not exposed to the internet directly
       subnet_ids = module.vpc.private_subnets
+      disk_size  = 20 # GB of EBS root storage per node
 
-      disk_size = 20 # GB of EBS root storage per node
-
+      # Labels used by nodeSelector in Helm chart values (monitoring, EFK, etc.)
       labels = {
-        role = "taskmanager"
+        role      = "system"
+        nodegroup = "system"
+      }
+    }
+
+    # ── Group 2: Application Workloads (SPOT) ───────────────────────────────
+    app_nodes = {
+      ami_type       = "AL2_x86_64"
+      instance_types = [var.app_node_instance_type]
+      capacity_type  = var.app_node_capacity_type # SPOT — stateless pods tolerate node replacement
+
+      min_size     = var.app_node_min_size
+      max_size     = var.app_node_max_size
+      desired_size = var.app_node_desired_size
+
+      subnet_ids = module.vpc.private_subnets
+      disk_size  = 20 # GB of EBS root storage per node
+
+      # Labels used by nodeSelector in k8s/frontend-deployment.yaml and k8s/backend-deployment.yaml
+      labels = {
+        role      = "application"
+        nodegroup = "app"
       }
     }
   }

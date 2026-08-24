@@ -73,74 +73,44 @@ resource "helm_release" "elasticsearch" {
   timeout    = 600
   wait       = true
 
-  # ── Cluster topology ─────────────────────────────────────────────────────
-  set {
-    name  = "replicas"
-    value = "1"
-  }
-
-  set {
-    name  = "minimumMasterNodes"
-    value = "1"
-  }
-
-  # ── Image ────────────────────────────────────────────────────────────────
-  set {
-    name  = "imageTag"
-    value = "8.15.0"
-  }
-
-  # ── JVM heap ─────────────────────────────────────────────────────────────
-  set {
-    name  = "esJavaOpts"
-    value = "-Xmx512m -Xms512m"
-  }
-
-  # ── Resources ────────────────────────────────────────────────────────────
-  set {
-    name  = "resources.requests.cpu"
-    value = "250m"
-  }
-
-  set {
-    name  = "resources.requests.memory"
-    value = "1Gi"
-  }
-
-  set {
-    name  = "resources.limits.cpu"
-    value = "1000m"
-  }
-
-  set {
-    name  = "resources.limits.memory"
-    value = "2Gi"
-  }
-
-  # ── Persistent storage (EBS gp3) ────────────────────────────────────────
-  set {
-    name  = "volumeClaimTemplate.storageClassName"
-    value = kubernetes_storage_class.gp3[0].metadata[0].name
-  }
-
-  set {
-    name  = "volumeClaimTemplate.resources.requests.storage"
-    value = "${var.efk_elasticsearch_volume_size}Gi"
-  }
-
-  # ── Security (disabled for dev) ──────────────────────────────────────────
-  set {
-    name  = "secret.enabled"
-    value = "false"
-  }
-
-  set {
-    name  = "createCert"
-    value = "false"
-  }
-
-  # Single-node discovery + disable security via elasticsearch.yml
   values = [yamlencode({
+    # ── Cluster topology ───────────────────────────────────────────────────
+    replicas           = 1
+    minimumMasterNodes = 1
+    imageTag           = "8.15.0"
+
+    # ── JVM heap ───────────────────────────────────────────────────────────
+    esJavaOpts = "-Xmx512m -Xms512m"
+
+    # ── Resources ──────────────────────────────────────────────────────────
+    resources = {
+      requests = {
+        cpu    = "250m"
+        memory = "1Gi"
+      }
+      limits = {
+        cpu    = "1000m"
+        memory = "2Gi"
+      }
+    }
+
+    # ── Persistent storage (EBS gp3) ──────────────────────────────────────
+    volumeClaimTemplate = {
+      storageClassName = kubernetes_storage_class.gp3[0].metadata[0].name
+      resources = {
+        requests = {
+          storage = "${var.efk_elasticsearch_volume_size}Gi"
+        }
+      }
+    }
+
+    # ── Security (disabled for dev/internal VPC) ───────────────────────────
+    secret = {
+      enabled = false
+    }
+    createCert = false
+
+    # Single-node discovery + disable security via elasticsearch.yml
     esConfig = {
       "elasticsearch.yml" = <<-EOT
         cluster.name: taskmanager-logs
@@ -154,6 +124,11 @@ resource "helm_release" "elasticsearch" {
 
     # Disable anti-affinity for single-node setup
     antiAffinity = "soft"
+
+    # Pin Elasticsearch StatefulSet to system_nodes (holds 10Gi EBS volume)
+    nodeSelector = {
+      nodegroup = "system"
+    }
 
     # Labels for EFK identification
     labels = {
@@ -331,69 +306,38 @@ resource "helm_release" "kibana" {
   timeout    = 600
   wait       = true
 
-  # ── Image ────────────────────────────────────────────────────────────────
-  set {
-    name  = "imageTag"
-    value = "8.15.0"
-  }
-
-  # ── Elasticsearch connection (no TLS, no auth) ──────────────────────────
-  set {
-    name  = "elasticsearchHosts"
-    value = "http://elasticsearch-master.logging.svc.cluster.local:9200"
-  }
-
-  # ── Resources ────────────────────────────────────────────────────────────
-  set {
-    name  = "resources.requests.cpu"
-    value = "100m"
-  }
-
-  set {
-    name  = "resources.requests.memory"
-    value = "512Mi"
-  }
-
-  set {
-    name  = "resources.limits.cpu"
-    value = "500m"
-  }
-
-  set {
-    name  = "resources.limits.memory"
-    value = "1Gi"
-  }
-
-  # ── Service: ClusterIP (routed via nginx-internal Ingress) ──────────────────
-  # No direct AWS Load Balancer — traffic arrives via the internal Ingress Controller.
-  set {
-    name  = "service.type"
-    value = "ClusterIP"
-  }
-
-  # ── Health check ─────────────────────────────────────────────────────────
-  set {
-    name  = "healthCheckPath"
-    value = "/app/kibana"
-  }
-
-  # ── Disable cert/secret references (security is off) ────────────────────
-  set {
-    name  = "elasticsearchCertificateSecret"
-    value = ""
-  }
-
-  set {
-    name  = "elasticsearchCertificateAuthoritiesFile"
-    value = ""
-  }
-
-  set {
-    name  = "elasticsearchCredentialSecret"
-    value = ""
-  }
-
   values = [yamlencode({
+    # ── Image ──────────────────────────────────────────────────────────────
+    imageTag = "8.15.0"
+
+    # ── Elasticsearch connection (no TLS, no auth) ────────────────────────
+    elasticsearchHosts = "http://elasticsearch-master.logging.svc.cluster.local:9200"
+
+    # ── Resources ──────────────────────────────────────────────────────────
+    resources = {
+      requests = {
+        cpu    = "100m"
+        memory = "512Mi"
+      }
+      limits = {
+        cpu    = "500m"
+        memory = "1Gi"
+      }
+    }
+
+    # ── Service: ClusterIP (routed via nginx-internal Ingress) ────────────
+    service = {
+      type = "ClusterIP"
+    }
+
+    # ── Health check ───────────────────────────────────────────────────────
+    healthCheckPath = "/app/kibana"
+
+    # ── Disable cert/secret references (security is off) ──────────────────
+    elasticsearchCertificateSecret          = ""
+    elasticsearchCertificateAuthoritiesFile = ""
+    elasticsearchCredentialSecret           = ""
+
     # Kibana server config — disable security features to match ES
     kibanaConfig = {
       "kibana.yml" = <<-EOT
@@ -403,6 +347,11 @@ resource "helm_release" "kibana" {
         telemetry.enabled: false
         monitoring.ui.enabled: false
       EOT
+    }
+
+    # Pin Kibana to system_nodes
+    nodeSelector = {
+      nodegroup = "system"
     }
 
     # Labels for EFK identification

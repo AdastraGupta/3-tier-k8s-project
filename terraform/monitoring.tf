@@ -102,6 +102,11 @@ resource "helm_release" "kube_prometheus_stack" {
           }
         ]
 
+        # Pin Grafana to system_nodes — never co-locate with app workloads
+        nodeSelector = {
+          nodegroup = "system"
+        }
+
         resources = {
           requests = {
             cpu    = "100m"
@@ -139,6 +144,11 @@ resource "helm_release" "kube_prometheus_stack" {
                 }
               }
             }
+          }
+
+          # Pin Prometheus StatefulSet to system_nodes (holds persistent TSDB)
+          nodeSelector = {
+            nodegroup = "system"
           }
 
           resources = {
@@ -201,6 +211,11 @@ resource "helm_release" "kube_prometheus_stack" {
                 }
               }
             }
+          }
+
+          # Pin Alertmanager to system_nodes
+          nodeSelector = {
+            nodegroup = "system"
           }
 
           resources = {
@@ -272,6 +287,15 @@ resource "helm_release" "kube_prometheus_stack" {
       # ── kube-state-metrics (Cluster / Workload Metrics) ─────────────────────
       kubeStateMetrics = {
         enabled = true
+      }
+
+      # ── Global nodeSelector for remaining stack components ──────────────────
+      # Pins prometheus-operator and admission webhooks to system_nodes.
+      # node-exporter is a DaemonSet and intentionally runs on ALL nodes.
+      prometheusOperator = {
+        nodeSelector = {
+          nodegroup = "system"
+        }
       }
     })
   ]

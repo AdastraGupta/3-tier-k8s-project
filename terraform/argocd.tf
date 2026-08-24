@@ -37,10 +37,14 @@ resource "helm_release" "argocd" {
 
   values = [yamlencode({
 
-    # ── Global labels ───────────────────────────────────────────────────────────
+    # ── Global configuration ───────────────────────────────────────────────────
     global = {
       labels = {
         "app.kubernetes.io/part-of" = "argocd"
+      }
+      # Pin all ArgoCD pods (server, repo-server, controller, redis, notifications) to system_nodes
+      nodeSelector = {
+        nodegroup = "system"
       }
     }
 

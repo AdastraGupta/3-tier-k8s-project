@@ -21,6 +21,9 @@ spec:
         prometheus.io/scrape: "false"   # nginx has no /metrics endpoint
     spec:
       serviceAccountName: frontend-sa
+      # Pin frontend pods to the application node group (SPOT instances)
+      nodeSelector:
+        nodegroup: app
       containers:
         - name: nginx
           image: nginx:1.25-alpine
