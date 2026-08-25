@@ -11,20 +11,20 @@ The system is structured into **4 decoupled, secure tiers**: External Ingress & 
 ```mermaid
 graph TB
     %% ──────────────────────────────────────────────────────────────────────────
-    %% DUAL-COLUMN ARCHITECTURE: PARALLEL NON-INTERSECTING DATA PIPELINES
+    %% 1. EXTERNAL ACTORS & ENTRY POINTS
     %% ──────────────────────────────────────────────────────────────────────────
-
-    subgraph CLIENTS["1. External Traffic & CI/CD Entry Layer"]
+    subgraph TIER_EXT["1. External Traffic & CI/CD Entry Layer"]
         direction LR
         User["🌐 Public Users\n(Internet / Mobile)"]
         DevOps["🔐 DevOps / SRE\n(VPN / Internal VPC)"]
         GitHub["📦 GitHub Repository\n(AdastraGupta/3-tier-k8s-project)"]
+        Teams["📣 Microsoft Teams\n(Webhook Alert Channel)"]
     end
 
     %% ──────────────────────────────────────────────────────────────────────────
-    %% 2. DUAL LOAD BALANCERS & INGRESS GATEWAYS
+    %% 2. DUAL INGRESS & LOAD BALANCING GATEWAY
     %% ──────────────────────────────────────────────────────────────────────────
-    subgraph GATEWAYS["2. Dual Load Balancer & Ingress Gateway Layer"]
+    subgraph TIER_GW["2. Dual Load Balancer & Ingress Gateway Layer"]
         direction LR
         subgraph PUB_GW["Public Gateway (Internet-Facing)"]
             PUB_NLB["☁️ AWS Public NLB"] --> ING_PUB["nginx-public Controller\n(ingressClassName: nginx-public)"]
@@ -35,54 +35,47 @@ graph TB
     end
 
     %% ──────────────────────────────────────────────────────────────────────────
-    %% 3. AMAZON EKS CLUSTER (v1.30)
+    %% 3. AMAZON EKS CLUSTER
     %% ──────────────────────────────────────────────────────────────────────────
-    subgraph EKS_CLUSTER["3. Amazon EKS Cluster (v1.30 · Hybrid Node Architecture)"]
+    subgraph TIER_EKS["3. Amazon EKS Cluster (v1.30 · Hybrid Compute Model)"]
 
-        %% LEFT COLUMN: APPLICATION & AUTOSCALING TIER (Karpenter Dynamic Spot Pool)
-        subgraph LEFT_COLUMN["🚀 Application & Autoscaling Plane (Karpenter Spot Nodes)"]
+        %% LEFT COLUMN: APPLICATION WORKLOADS (Karpenter Dynamic Spot Pool)
+        subgraph APP_STACK["🚀 Application Tier (taskmanager · Karpenter Spot Nodes)"]
             direction TB
-
             TM_ING["taskmanager-ingress\n(/ ➔ Frontend · /api ➔ Backend)"]
-
-            subgraph FE_STACK["Frontend Workload"]
+            
+            subgraph FE_WORKLOAD["Frontend Workload"]
                 FD["Frontend Pods (Nginx UI)\n3–10 Replicas · port 80"]
                 FE_HPA["📈 frontend-hpa (CPU 75% · Mem 80%)"]
                 FE_PDB["🛡️ frontend-pdb (minAvailable: 2)"]
-                FE_HPA --> FD
-                FE_PDB -.-> FD
             end
 
-            subgraph BE_STACK["Backend Workload"]
+            subgraph BE_WORKLOAD["Backend Workload"]
                 BD["Backend Pods (PostgREST API)\n2–15 Replicas · port 3000"]
                 BE_SO["⚡ backend-scaledobject (KEDA)"]
                 BE_PDB["🛡️ backend-pdb (minAvailable: 1)"]
-                BE_SO --> BD
-                BE_PDB -.-> BD
-            end
-
-            subgraph AUTOSCALER_CORE["Autoscaling & Node Provisioning Engine"]
-                METRICS_SRV["📊 Metrics Server"] --> FE_HPA
-                KEDA_CTRL["⚡ KEDA Controller v2.15"] --> BE_SO
-                KP_CTRL["🚀 Karpenter Controller v1.0.8"] -->|"Provisions Nodes <45s"| BD
-                KP_CTRL -->|"Provisions Nodes <45s"| FD
             end
 
             DB_SVC["postgres-svc\n(ExternalName :5432)"]
 
-            TM_ING -->|"Path: /"| FD
-            TM_ING -->|"Path: /api"| BD
+            TM_ING -->|"/"| FD
+            TM_ING -->|"/api"| BD
             BD -->|"SQL Query"| DB_SVC
         end
 
         %% RIGHT COLUMN: PLATFORM, GITOPS & OBSERVABILITY (system_nodes On-Demand)
-        subgraph RIGHT_COLUMN["⚙️ Platform, GitOps & Observability Plane (system_nodes On-Demand)"]
+        subgraph SYS_STACK["⚙️ Platform & Operations Tier (system_nodes · On-Demand t3.medium)"]
             direction TB
 
-            subgraph GITOPS_CORE["GitOps Continuous Delivery (argocd)"]
-                ArgoCD["🔄 ArgoCD Server v2.12\n(/argocd · ClusterIP)"]
+            subgraph GITOPS_CORE["GitOps Continuous Delivery"]
+                ArgoCD["🔄 ArgoCD Server v2.12\n(/argocd · Helm-managed)"]
                 ArgoNotif["🔔 ArgoCD Notifications"]
-                ArgoCD --> ArgoNotif
+            end
+
+            subgraph AUTOSCALE_CORE["Autoscaling & Node Provisioning Engine"]
+                METRICS_SRV["📊 Kubernetes Metrics Server"]
+                KEDA_CTRL["⚡ KEDA Controller v2.15"]
+                KP_CTRL["🚀 Karpenter Controller v1.0.8"]
             end
 
             subgraph OBSERVE_CORE["3-Pillar Observability & AI SRE Stack"]
@@ -93,80 +86,75 @@ graph TB
                 KB["🔎 Kibana 8.15 (/kibana)"]
                 JAEGER["🔭 Jaeger Tracing 3.0 (/jaeger)"]
                 K8SGPT["🤖 K8sGPT Operator (AI SRE)"]
-
-                PROM --> GRAF
-                PROM --> ALERT
-                ES --> KB
-                ES --> JAEGER
             end
 
-            subgraph STORAGE_CORE["Storage & Core Networking Add-ons"]
+            subgraph STORAGE_CORE["Storage & Networking Add-ons"]
                 EBS_CSI["💾 AWS EBS CSI Driver"] --> SC_GP3["📦 StorageClass: gp3"]
                 VPC_CNI["🌐 AWS VPC CNI"]
                 COREDNS["🔎 CoreDNS"]
-                SC_GP3 -.->|"Persistent Volumes"| PROM
-                SC_GP3 -.->|"Persistent Volumes"| ES
             end
         end
     end
 
     %% ──────────────────────────────────────────────────────────────────────────
-    %% 4. AWS MANAGED SERVICES & NOTIFICATION DESTINATIONS
+    %% 4. AWS MANAGED SERVICES
     %% ──────────────────────────────────────────────────────────────────────────
-    subgraph MANAGED_SERVICES["4. AWS Managed Cloud Services & Alert Destinations"]
+    subgraph TIER_AWS["4. AWS Managed Cloud Services"]
         direction LR
         RDS["🗄️ AWS RDS PostgreSQL 15\n(db.t4g.micro · taskdb)"]
-        KP_SQS["📬 SQS Interruption Queue\n(2-min Spot Warning Handler)"]
         Bedrock["🧠 AWS Bedrock (Claude 3 Haiku)\n(Zero Secrets via IRSA)"]
         CW["☁️ CloudWatch Logs & Dashboard\n(taskmanager-observability)"]
-        Teams["📣 Microsoft Teams\n(Adaptive Incident Cards)"]
+        KP_SQS["📬 SQS Interruption Queue\n(2-min Spot Warning Handler)"]
     end
 
     %% ──────────────────────────────────────────────────────────────────────────
-    %% DIRECT, NON-INTERSECTING PIPELINE FLOW ARROWS
+    %% DIRECT, NON-INTERSECTING PIPELINE FLOWS
     %% ──────────────────────────────────────────────────────────────────────────
-    %% Left Pipeline: Public App Traffic
+    %% Public App Traffic Pipeline
     User ==>|"HTTP :80"| PUB_NLB
-    ING_PUB ==>|"Route App Traffic"| TM_ING
-    DB_SVC ==>|"PostgreSQL Connection :5432"| RDS
+    ING_PUB ==>|"Route Traffic"| TM_ING
+    DB_SVC ==>|"PostgreSQL Connection"| RDS
 
-    %% Right Pipeline: Internal Admin Tools Ingress
+    %% Internal Admin Tools Traffic Pipeline
     DevOps ==>|"VPN / Private Access"| INT_NLB
     ING_INT -.->|"/grafana"| GRAF
     ING_INT -.->|"/kibana"| KB
     ING_INT -.->|"/argocd"| ArgoCD
     ING_INT -.->|"/jaeger"| JAEGER
 
-    %% GitOps Sync Pipeline
+    %% GitOps Continuous Delivery Pipeline
     GitHub -->|"git push to main"| ArgoCD
-    ArgoCD ==>|"Auto-Sync Manifests"| TM_ING
-
-    %% Spot Interruption & Cloud Feedback
-    KP_SQS -.->|"Spot Reclaim Signal"| KP_CTRL
-    PROM -.->|"EMF Metrics"| CW
-    K8SGPT -->|"IRSA Invoke"| Bedrock
-
-    %% Forward-Only Alert Notification Pipeline
+    ArgoCD -->|"Auto-Sync Manifests"| APP_STACK
     ArgoNotif -.->|"Sync Alerts"| Teams
+    GitHub -.->|"CI/CD Alerts"| Teams
+
+    %% Autoscaling Feedback Loop
+    METRICS_SRV -.-> FE_HPA
+    KEDA_CTRL -.-> BE_SO
+    KP_CTRL ==>|"Provisions Spot Nodes (<45s)"| APP_STACK
+    KP_SQS -.->|"Spot Reclaim Signal"| KP_CTRL
+
+    %% Observability & AI Diagnosis
     ALERT -.->|"Firing Alerts"| Teams
+    K8SGPT -->|"IRSA Invoke"| Bedrock
     K8SGPT -.->|"AI Incident Cards"| Teams
 
     %% ──────────────────────────────────────────────────────────────────────────
     %% RICH, DARK-THEMED, HIGH-CONTRAST STYLES (NO LIGHT COLORS)
     %% ──────────────────────────────────────────────────────────────────────────
-    style CLIENTS fill:#0f172a,stroke:#334155,stroke-width:2px,color:#ffffff
-    style GATEWAYS fill:#0f172a,stroke:#1e3a8a,stroke-width:2px,color:#ffffff
-    style EKS_CLUSTER fill:#090d16,stroke:#475569,stroke-width:2px,color:#ffffff
-    style MANAGED_SERVICES fill:#0f172a,stroke:#9a3412,stroke-width:2px,color:#ffffff
-
+    style TIER_EXT fill:#0f172a,stroke:#334155,stroke-width:2px,color:#ffffff
+    style TIER_GW fill:#0f172a,stroke:#1e3a8a,stroke-width:2px,color:#ffffff
+    style TIER_EKS fill:#090d16,stroke:#475569,stroke-width:2px,color:#ffffff
+    style TIER_AWS fill:#0f172a,stroke:#9a3412,stroke-width:2px,color:#ffffff
+    
     style PUB_GW fill:#172554,stroke:#1d4ed8,color:#ffffff
     style INT_GW fill:#1e1b4b,stroke:#4338ca,color:#ffffff
-    style LEFT_COLUMN fill:#052e16,stroke:#15803d,stroke-width:2px,color:#ffffff
-    style RIGHT_COLUMN fill:#1e1b4b,stroke:#4f46e5,stroke-width:2px,color:#ffffff
-    style FE_STACK fill:#064e3b,stroke:#059669,color:#ffffff
-    style BE_STACK fill:#78350f,stroke:#d97706,color:#ffffff
-    style AUTOSCALER_CORE fill:#172554,stroke:#2563eb,color:#ffffff
+    style APP_STACK fill:#052e16,stroke:#15803d,stroke-width:2px,color:#ffffff
+    style SYS_STACK fill:#1e1b4b,stroke:#4f46e5,stroke-width:2px,color:#ffffff
+    style FE_WORKLOAD fill:#064e3b,stroke:#059669,color:#ffffff
+    style BE_WORKLOAD fill:#78350f,stroke:#d97706,color:#ffffff
     style GITOPS_CORE fill:#311042,stroke:#7e22ce,color:#ffffff
+    style AUTOSCALE_CORE fill:#172554,stroke:#2563eb,color:#ffffff
     style OBSERVE_CORE fill:#18181b,stroke:#3f3f46,color:#ffffff
     style STORAGE_CORE fill:#1c1917,stroke:#57534e,color:#ffffff
 
