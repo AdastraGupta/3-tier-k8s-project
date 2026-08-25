@@ -52,6 +52,7 @@ spec:
     Name: taskmanager-cluster-karpenter-node
     ManagedBy: Karpenter
     nodegroup: app
+    karpenter.sh/nodepool: app-nodepool
 
 ---
 # ─── 2. NodePool: Controls pod scheduling and scaling policy ──────────────────
@@ -115,8 +116,8 @@ spec:
   # Hard ceiling: Karpenter will never provision nodes beyond this total.
   # Protects against runaway scaling from misconfigured HPA/KEDA targets.
   limits:
-    cpu: "100"         # 100 vCPUs across all Karpenter-managed app nodes
-    memory: "200Gi"    # 200 GB RAM across all Karpenter-managed app nodes
+    cpu: "100" # 100 vCPUs across all Karpenter-managed app nodes
+    memory: "200Gi" # 200 GB RAM across all Karpenter-managed app nodes
 
   # ── Disruption & Node Consolidation Policy ────────────────────────────────────
   disruption:
