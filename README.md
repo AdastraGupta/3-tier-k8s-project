@@ -10,197 +10,278 @@ The system is structured into **4 decoupled, secure tiers**: External Ingress & 
 
 ```mermaid
 graph TB
-    %% ──────────────────────────────────────────────────────────────────────────
-    %% 1. EXTERNAL ACTORS & ENTRY POINTS
-    %% ──────────────────────────────────────────────────────────────────────────
-    subgraph TIER_EXT["1. External Traffic & CI/CD Entry Layer"]
-        direction LR
-        User["🌐 Public Users\n(Internet / Mobile)"]
-        DevOps["🔐 DevOps / SRE\n(VPN / Internal VPC)"]
-        GitHub["📦 GitHub Repository\n(AdastraGupta/3-tier-k8s-project)"]
-        Teams["📣 Microsoft Teams\n(Webhook Alert Channel)"]
-    end
+    User["🌐 User / Public Browser"]
+    GitHub["📦 GitHub Repository\n(AdastraGupta/3-tier-k8s-project · main)"]
+    Teams["📣 Microsoft Teams\n(CI/CD · GitOps · Alertmanager)"]
+    DevOps["🔐 DevOps / SRE / VPN\n(Internal Tools Access)"]
 
-    %% ──────────────────────────────────────────────────────────────────────────
-    %% 2. DUAL INGRESS & LOAD BALANCING GATEWAY
-    %% ──────────────────────────────────────────────────────────────────────────
-    subgraph TIER_GW["2. Dual Load Balancer & Ingress Gateway Layer"]
-        direction LR
-        subgraph PUB_GW["Public Gateway (Internet-Facing)"]
-            PUB_NLB["☁️ AWS Public NLB"] --> ING_PUB["nginx-public Controller\n(ingressClassName: nginx-public)"]
-        end
-        subgraph INT_GW["Internal Gateway (VPC-Only)"]
-            INT_NLB["🔒 AWS Internal NLB"] --> ING_INT["nginx-internal Controller\n(ingressClassName: nginx-internal)"]
-        end
-    end
+    subgraph "AWS Cloud — us-east-1"
 
-    %% ──────────────────────────────────────────────────────────────────────────
-    %% 3. AMAZON EKS CLUSTER
-    %% ──────────────────────────────────────────────────────────────────────────
-    subgraph TIER_EKS["3. Amazon EKS Cluster (v1.30 · Hybrid Compute Model)"]
-
-        %% LEFT COLUMN: APPLICATION WORKLOADS (Karpenter Dynamic Spot Pool)
-        subgraph APP_STACK["🚀 Application Tier (taskmanager · Karpenter Spot Nodes)"]
-            direction TB
-            TM_ING["taskmanager-ingress\n(/ ➔ Frontend · /api ➔ Backend)"]
-            
-            subgraph FE_WORKLOAD["Frontend Workload"]
-                FD["Frontend Pods (Nginx UI)\n3–10 Replicas · port 80"]
-                FE_HPA["📈 frontend-hpa (CPU 75% · Mem 80%)"]
-                FE_PDB["🛡️ frontend-pdb (minAvailable: 2)"]
-            end
-
-            subgraph BE_WORKLOAD["Backend Workload"]
-                BD["Backend Pods (PostgREST API)\n2–15 Replicas · port 3000"]
-                BE_SO["⚡ backend-scaledobject (KEDA)"]
-                BE_PDB["🛡️ backend-pdb (minAvailable: 1)"]
-            end
-
-            DB_SVC["postgres-svc\n(ExternalName :5432)"]
-
-            TM_ING -->|"/"| FD
-            TM_ING -->|"/api"| BD
-            BD -->|"SQL Query"| DB_SVC
+        subgraph "Dual Load Balancer Layer"
+            PUB_NLB["☁️ Public AWS NLB\n(nginx-public · internet-facing)\n→ Public App Traffic"]
+            INT_NLB["🔒 Internal AWS NLB\n(nginx-internal · VPC-only CIDR)\n→ Internal Observability & GitOps"]
         end
 
-        %% RIGHT COLUMN: PLATFORM, GITOPS & OBSERVABILITY (system_nodes On-Demand)
-        subgraph SYS_STACK["⚙️ Platform & Operations Tier (system_nodes · On-Demand t3.medium)"]
-            direction TB
+        subgraph "Amazon EKS Cluster (v1.30 · System On-Demand + Karpenter Dynamic Spot)"
 
-            subgraph GITOPS_CORE["GitOps Continuous Delivery"]
-                ArgoCD["🔄 ArgoCD Server v2.12\n(/argocd · Helm-managed)"]
-                ArgoNotif["🔔 ArgoCD Notifications"]
+            subgraph "ingress-nginx Namespace (Dual Ingress Controllers)"
+                ING_PUB["nginx-public Controller\n(ingressClassName: nginx-public)"]
+                ING_INT["nginx-internal Controller\n(ingressClassName: nginx-internal)"]
+                INT_ING["internal-tools-ingress\n(ingressClassName: nginx-internal)"]
+                EXT_GRAF["grafana-external\n(ExternalName → monitoring)"]
+                EXT_KB["kibana-external\n(ExternalName → logging)"]
+                EXT_ARGO["argocd-external\n(ExternalName → argocd)"]
+                EXT_JAEGER["jaeger-external\n(ExternalName → tracing)"]
             end
 
-            subgraph AUTOSCALE_CORE["Autoscaling & Node Provisioning Engine"]
-                METRICS_SRV["📊 Kubernetes Metrics Server"]
-                KEDA_CTRL["⚡ KEDA Controller v2.15"]
-                KP_CTRL["🚀 Karpenter Controller v1.0.8"]
+            subgraph "argocd Namespace (Helm: argo/argo-cd)"
+                ArgoCD["🔄 ArgoCD Server\n(GitOps Controller v2.12 · ClusterIP)\nSubpath: /argocd"]
+                ArgoNotif["🔔 ArgoCD Notifications\n(MS Teams webhook triggers)"]
             end
 
-            subgraph OBSERVE_CORE["3-Pillar Observability & AI SRE Stack"]
-                PROM["📊 Prometheus 2.53 (10Gi gp3 TSDB)"]
-                GRAF["📈 Grafana 11.1 (/grafana)"]
-                ALERT["🚨 Alertmanager 0.27"]
-                ES["💾 Elasticsearch 8.15 (10Gi gp3)"]
-                KB["🔎 Kibana 8.15 (/kibana)"]
-                JAEGER["🔭 Jaeger Tracing 3.0 (/jaeger)"]
-                K8SGPT["🤖 K8sGPT Operator (AI SRE)"]
+            subgraph "taskmanager Namespace (Application Tier)"
+                direction TB
+                TM_ING["ingress.yaml\n(nginx-public: / and /api→rewrite→/)"]
+                subgraph "Frontend Tier"
+                    FD["Frontend Pods\n(nginx:1.25-alpine)\n3–10 replicas · port 80"]
+                    FS["frontend-svc\n(ClusterIP :80)"]
+                    FE_HPA["📈 frontend-hpa\n(HPA: CPU 75% · Mem 80%)\nmin:3 → max:10 pods"]
+                    FE_PDB["🛡️ frontend-pdb\n(minAvailable: 2)"]
+                end
+                subgraph "Backend Tier"
+                    BD["Backend Pods\n(postgrest/postgrest:v12.2.3)\n2–15 replicas · port 3000"]
+                    BS["backend-svc\n(ClusterIP :3000)"]
+                    BE_SO["⚡ backend-scaledobject\n(KEDA: Prometheus req/min + CPU 70%)\nmin:2 → max:15 pods"]
+                    BE_PDB["🛡️ backend-pdb\n(minAvailable: 1)"]
+                end
+                subgraph "Database Access"
+                    PS["postgres-svc\n(ExternalName :5432 → RDS)"]
+                end
+                CM["ConfigMaps & Secrets\n(app-config · app-secret)"]
             end
 
-            subgraph STORAGE_CORE["Storage & Networking Add-ons"]
-                EBS_CSI["💾 AWS EBS CSI Driver"] --> SC_GP3["📦 StorageClass: gp3"]
-                VPC_CNI["🌐 AWS VPC CNI"]
-                COREDNS["🔎 CoreDNS"]
+            subgraph "kube-system Namespace (EKS Managed Add-ons)"
+                VPC_CNI["🌐 AWS VPC CNI\n(Pod IP Allocation from VPC Subnets)"]
+                COREDNS["🔎 CoreDNS\n(In-Cluster DNS & Service Discovery)"]
+                KPROXY["🔀 kube-proxy\n(Node Network & Service Routing)"]
+                EBS_CSI["💾 AWS EBS CSI Driver\n(ebs.csi.aws.com provisioner)"]
             end
+
+            subgraph "Cluster Storage Layer"
+                SC_GP3["📦 StorageClass: gp3\n(WaitForFirstConsumer · Retain · Expansion)\n→ Dynamic EBS gp3 Provisioning"]
+            end
+
+            subgraph "monitoring Namespace (Helm: kube-prometheus-stack)"
+                PROM["📊 Prometheus 2.53\n(StatefulSet · 10Gi EBS gp3 TSDB)"]
+                GRAF["📈 Grafana 11.1\n(Deployment · ClusterIP)\nSubpath: /grafana"]
+                ALERT["🚨 Alertmanager 0.27\n(Deployment · 5Gi EBS gp3)"]
+                NE["node-exporter\n(DaemonSet · Host Telemetry)"]
+                KSM["kube-state-metrics\n(Deployment · K8s Objects)"]
+            end
+
+            subgraph "tracing Namespace (Helm: Jaeger Stack)"
+                JAEGER_Q["🔭 Jaeger Query (Deployment)\n(Web UI :16686)\nSubpath: /jaeger — Reads from ES"]
+                JAEGER_C["📡 Jaeger Collector (Deployment)\n(OTLP gRPC :4317 · HTTP :4318)\nStateless — writes spans to ES"]
+                JAEGER_A["🔁 Jaeger Agent (DaemonSet)\n(per-node span batcher)\nRoutes spans → Collector"]
+            end
+
+            subgraph "amazon-cloudwatch Namespace"
+                CWAgent["CloudWatch Agent DaemonSet\n(Prometheus EMF Scraper)"]
+            end
+
+            subgraph "logging Namespace (Helm: EFK Stack)"
+                ES["Elasticsearch 8.15\n(StatefulSet · 10Gi EBS gp3)"]
+                FB["Fluent Bit 3.1\n(DaemonSet · Log Collector)"]
+                KB["Kibana 8.15\n(Deployment · ClusterIP)\nSubpath: /kibana"]
+            end
+
+            subgraph "k8sgpt Namespace (Helm: k8sgpt-operator)"
+                K8SGPT["🤖 K8sGPT Operator\n(AI-Powered SRE Engine)\nIRSA Role: Claude 3 Haiku"]
+            end
+
+            subgraph "keda Namespace (Helm: kedacore/keda)"
+                KEDA_CTRL["⚡ KEDA Controller\n(2 replicas · event-driven pod scaler)\nPrometheus ScaledObject triggers"]
+                METRICS_SRV["📊 Kubernetes Metrics Server\n(CPU/Memory telemetry for HPA)"]
+            end
+
+            subgraph "Karpenter Dynamic Node Pool (AWS EC2 Fleet)"
+                KP_CTRL["🚀 Karpenter Controller\n(kube-system · 2 replicas · IRSA)\nProvisions EC2 in < 45 seconds"]
+                KP_NP["NodePool: app-nodepool\n(Spot→On-Demand fallback)\nt3/c6i/m6i · 100 vCPU limit"]
+                KP_INTR["📬 SQS Interruption Queue\n+ 3× EventBridge Rules\n(2-min Spot warning handler)"]
+            end
+        end
+
+        subgraph "AWS Managed Services"
+            RDS["🗄️ AWS RDS PostgreSQL 15\n(db.t4g.micro · Single-AZ)\nDB: taskdb · port 5432 · sslmode=require"]
+            CWLogs["CloudWatch Logs\n(/aws/containerinsights/prometheus)\n(/aws/containerinsights/performance)"]
+            CWDash["CloudWatch Dashboard & Alarms\n(taskmanager-cluster-observability)\nAlarms: RDS CPU > 80% · Storage < 2 GB"]
+            Bedrock["🧠 AWS Bedrock\n(Anthropic Claude 3 Haiku)\nModel: claude-3-haiku-20240307-v1:0"]
         end
     end
 
-    %% ──────────────────────────────────────────────────────────────────────────
-    %% 4. AWS MANAGED SERVICES
-    %% ──────────────────────────────────────────────────────────────────────────
-    subgraph TIER_AWS["4. AWS Managed Cloud Services"]
-        direction LR
-        RDS["🗄️ AWS RDS PostgreSQL 15\n(db.t4g.micro · taskdb)"]
-        Bedrock["🧠 AWS Bedrock (Claude 3 Haiku)\n(Zero Secrets via IRSA)"]
-        CW["☁️ CloudWatch Logs & Dashboard\n(taskmanager-observability)"]
-        KP_SQS["📬 SQS Interruption Queue\n(2-min Spot Warning Handler)"]
-    end
-
-    %% ──────────────────────────────────────────────────────────────────────────
-    %% DIRECT, NON-INTERSECTING PIPELINE FLOWS
-    %% ──────────────────────────────────────────────────────────────────────────
-    %% Public App Traffic Pipeline
-    User ==>|"HTTP :80"| PUB_NLB
-    ING_PUB ==>|"Route Traffic"| TM_ING
-    DB_SVC ==>|"PostgreSQL Connection"| RDS
-
-    %% Internal Admin Tools Traffic Pipeline
-    DevOps ==>|"VPN / Private Access"| INT_NLB
-    ING_INT -.->|"/grafana"| GRAF
-    ING_INT -.->|"/kibana"| KB
-    ING_INT -.->|"/argocd"| ArgoCD
-    ING_INT -.->|"/jaeger"| JAEGER
-
-    %% GitOps Continuous Delivery Pipeline
+    %% GitOps Continuous Delivery flow
     GitHub -->|"git push to main"| ArgoCD
-    ArgoCD -->|"Auto-Sync Manifests"| APP_STACK
-    ArgoNotif -.->|"Sync Alerts"| Teams
-    GitHub -.->|"CI/CD Alerts"| Teams
+    ArgoCD -->|"auto-sync manifests"| TM_ING
+    ArgoCD -->|"auto-sync manifests"| FS
+    ArgoCD -->|"auto-sync manifests"| BS
+    ArgoCD --> ArgoNotif
+    ArgoNotif -->|"Sync / Health Alerts (Webhook)"| Teams
+    GitHub -.->|"CI/CD Plan / Apply / Destroy Alerts"| Teams
 
-    %% Autoscaling Feedback Loop
-    METRICS_SRV -.-> FE_HPA
-    KEDA_CTRL -.-> BE_SO
-    KP_CTRL ==>|"Provisions Spot Nodes (<45s)"| APP_STACK
-    KP_SQS -.->|"Spot Reclaim Signal"| KP_CTRL
+    %% 🌐 PUBLIC TRAFFIC FLOW: User → Public NLB → nginx-public Controller → Ingress Rules → Frontend/Backend
+    User -->|"HTTP :80 (Public Internet)"| PUB_NLB
+    PUB_NLB --> ING_PUB
+    ING_PUB --> TM_ING
+    TM_ING -->|"Path: / (Frontend UI)"| FS
+    TM_ING -->|"Path: /api (REST API)"| BS
+    FS --> FD
+    BS --> BD
 
-    %% Observability & AI Diagnosis
-    ALERT -.->|"Firing Alerts"| Teams
-    K8SGPT -->|"IRSA Invoke"| Bedrock
-    K8SGPT -.->|"AI Incident Cards"| Teams
+    %% 🔒 INTERNAL TRAFFIC FLOW: DevOps → Internal NLB → nginx-internal → ExternalName Proxies → Target Tools
+    DevOps -->|"VPN / SSM / Port-Forward"| INT_NLB
+    INT_NLB --> ING_INT
+    ING_INT --> INT_ING
+    INT_ING -->|"Path: /grafana"| EXT_GRAF
+    INT_ING -->|"Path: /kibana"| EXT_KB
+    INT_ING -->|"Path: /argocd"| EXT_ARGO
+    INT_ING -->|"Path: /jaeger"| EXT_JAEGER
+    EXT_GRAF -->|"kube-prometheus-stack-grafana:80"| GRAF
+    EXT_KB -->|"kibana-kibana:5601"| KB
+    EXT_ARGO -->|"argocd-server:80"| ArgoCD
+    EXT_JAEGER -->|"jaeger-query:16686"| JAEGER_Q
 
-    %% ──────────────────────────────────────────────────────────────────────────
-    %% RICH, DARK-THEMED, HIGH-CONTRAST STYLES (NO LIGHT COLORS)
-    %% ──────────────────────────────────────────────────────────────────────────
-    style TIER_EXT fill:#0f172a,stroke:#334155,stroke-width:2px,color:#ffffff
-    style TIER_GW fill:#0f172a,stroke:#1e3a8a,stroke-width:2px,color:#ffffff
-    style TIER_EKS fill:#090d16,stroke:#475569,stroke-width:2px,color:#ffffff
-    style TIER_AWS fill:#0f172a,stroke:#9a3412,stroke-width:2px,color:#ffffff
-    
-    style PUB_GW fill:#172554,stroke:#1d4ed8,color:#ffffff
-    style INT_GW fill:#1e1b4b,stroke:#4338ca,color:#ffffff
-    style APP_STACK fill:#052e16,stroke:#15803d,stroke-width:2px,color:#ffffff
-    style SYS_STACK fill:#1e1b4b,stroke:#4f46e5,stroke-width:2px,color:#ffffff
-    style FE_WORKLOAD fill:#064e3b,stroke:#059669,color:#ffffff
-    style BE_WORKLOAD fill:#78350f,stroke:#d97706,color:#ffffff
-    style GITOPS_CORE fill:#311042,stroke:#7e22ce,color:#ffffff
-    style AUTOSCALE_CORE fill:#172554,stroke:#2563eb,color:#ffffff
-    style OBSERVE_CORE fill:#18181b,stroke:#3f3f46,color:#ffffff
-    style STORAGE_CORE fill:#1c1917,stroke:#57534e,color:#ffffff
+    %% Application Backend → Database
+    BD -->|"PGRST_DB_URI (Port 5432)"| PS
+    PS -->|"ExternalName DNS"| RDS
 
-    %% Actor Nodes
-    style User fill:#0284c7,stroke:#0369a1,color:#ffffff
-    style DevOps fill:#6366f1,stroke:#4338ca,color:#ffffff
-    style GitHub fill:#18181b,stroke:#52525b,color:#ffffff
-    style Teams fill:#5b21b6,stroke:#4c1d95,color:#ffffff
+    %% Configuration & Secrets Injection
+    CM -.->|"Environment variables"| FD
+    CM -.->|"Environment variables"| BD
 
-    %% Load Balancers & Ingress
-    style PUB_NLB fill:#c2410c,stroke:#9a3412,color:#ffffff
-    style INT_NLB fill:#1e40af,stroke:#1e3a8a,color:#ffffff
-    style ING_PUB fill:#1d4ed8,stroke:#1e40af,color:#ffffff
-    style ING_INT fill:#4338ca,stroke:#3730a3,color:#ffffff
+    %% EKS Add-ons & Dynamic Storage Provisioning Flow
+    EBS_CSI -->|"powers provisioner"| SC_GP3
+    SC_GP3 -.->|"10Gi PVC dynamic volume"| PROM
+    SC_GP3 -.->|"5Gi PVC dynamic volume"| ALERT
+    SC_GP3 -.->|"10Gi PVC dynamic volume"| ES
 
-    %% Application Pods & Database
-    style TM_ING fill:#1d4ed8,stroke:#1e40af,color:#ffffff
-    style FD fill:#15803d,stroke:#166534,color:#ffffff
-    style BD fill:#b45309,stroke:#92400e,color:#ffffff
-    style DB_SVC fill:#0f766e,stroke:#115e59,color:#ffffff
-    style RDS fill:#b91c1c,stroke:#991b1b,color:#ffffff
-    style Bedrock fill:#c2410c,stroke:#9a3412,color:#ffffff
-    style CW fill:#c2410c,stroke:#9a3412,color:#ffffff
-    style KP_SQS fill:#0284c7,stroke:#0369a1,color:#ffffff
+    %% Prometheus Metrics Collection & Alerting
+    NE -.->|"Node hardware metrics"| PROM
+    KSM -.->|"Kubernetes object states"| PROM
+    BD -.->|"PostgREST metrics (/metrics)"| PROM
+    FD -.->|"Container metrics"| PROM
+    PROM -->|"PromQL query API"| GRAF
+    PROM -->|"Alerting rules evaluation"| ALERT
+    ALERT -->|"Firing / Resolved alerts (Webhook)"| Teams
 
-    %% Core Platform & Tools
-    style ArgoCD fill:#c2410c,stroke:#9a3412,color:#ffffff
-    style ArgoNotif fill:#9a3412,stroke:#7c2d12,color:#ffffff
-    style PROM fill:#c2410c,stroke:#9a3412,color:#ffffff
-    style GRAF fill:#b45309,stroke:#78350f,color:#ffffff
-    style ALERT fill:#b91c1c,stroke:#991b1b,color:#ffffff
-    style ES fill:#0f766e,stroke:#115e59,color:#ffffff
-    style KB fill:#be185d,stroke:#9d174d,color:#ffffff
-    style JAEGER fill:#0e7490,stroke:#155e75,color:#ffffff
-    style K8SGPT fill:#7e22ce,stroke:#6b21a8,color:#ffffff
-    style KP_CTRL fill:#1d4ed8,stroke:#1e40af,color:#ffffff
-    style KEDA_CTRL fill:#ea580c,stroke:#c2410c,color:#ffffff
-    style METRICS_SRV fill:#d97706,stroke:#b45309,color:#ffffff
-    style EBS_CSI fill:#4338ca,stroke:#3730a3,color:#ffffff
-    style SC_GP3 fill:#6b21a8,stroke:#581c87,color:#ffffff
-    style VPC_CNI fill:#0f766e,stroke:#115e59,color:#ffffff
-    style COREDNS fill:#0f766e,stroke:#115e59,color:#ffffff
-    style FE_HPA fill:#059669,stroke:#047857,color:#ffffff
-    style FE_PDB fill:#047857,stroke:#065f46,color:#ffffff
-    style BE_SO fill:#d97706,stroke:#b45309,color:#ffffff
-    style BE_PDB fill:#b45309,stroke:#92400e,color:#ffffff
+    %% Distributed Tracing (Jaeger) — component connections
+    JAEGER_A -.->|"batches spans"| JAEGER_C
+    JAEGER_C -->|"Bulk writes traces (ES Index API)"| ES
+    JAEGER_Q -->|"Reads trace data (ES Search API)"| ES
+
+    %% AWS CloudWatch Embedded Metric Format (EMF)
+    BD -.-|"Prometheus /metrics"| CWAgent
+    CWAgent -->|"EMF Structured Logs"| CWLogs
+    CWLogs --> CWDash
+
+    %% Centralized Logging (EFK)
+    FD -.-|"stdout / stderr"| FB
+    BD -.-|"stdout / stderr"| FB
+    FB -->|"HTTP Bulk Ingestion"| ES
+    ES -->|"Search & Query API"| KB
+
+    %% AI SRE Incident Triage (K8sGPT + AWS Bedrock)
+    FD -.->|"Failure logs / CrashEvents"| K8SGPT
+    BD -.->|"Failure logs / CrashEvents"| K8SGPT
+    K8SGPT -->|"bedrock:InvokeModel (IRSA)"| Bedrock
+    Bedrock -->|"AI Root Cause & Fix Commands"| K8SGPT
+    K8SGPT -->|"AI Incident Diagnosis (Webhook)"| Teams
+
+    %% Full-Stack Autoscaling (KEDA + HPA + Karpenter)
+    PROM -.->|"PromQL req/min metric"| KEDA_CTRL
+    KEDA_CTRL -.->|"Drives HPA replica count"| BE_SO
+    METRICS_SRV -.->|"CPU/Mem telemetry"| FE_HPA
+    METRICS_SRV -.->|"CPU/Mem telemetry"| BE_SO
+    BE_SO -.->|"Scales 2→15 pods"| BD
+    FE_HPA -.->|"Scales 3→10 pods"| FD
+    BE_PDB -.->|"Guards during drain"| BD
+    FE_PDB -.->|"Guards during drain"| FD
+    BD -.->|"Pending pods trigger"| KP_CTRL
+    FD -.->|"Pending pods trigger"| KP_CTRL
+    KP_CTRL -->|"EC2 Fleet API (< 45s)"| KP_NP
+    KP_INTR -.->|"Spot 2-min warning"| KP_CTRL
+
+    %% Styles — External Actors
+    style User fill:#4FC3F7,stroke:#0277BD,color:#000
+    style DevOps fill:#7B68EE,stroke:#4B0082,color:#fff
+    style GitHub fill:#24292E,stroke:#586069,color:#fff
+    style Teams fill:#6264A7,stroke:#464775,color:#fff
+
+    %% Styles — Load Balancers
+    style PUB_NLB fill:#FF9900,stroke:#232F3E,color:#000
+    style INT_NLB fill:#5C6BC0,stroke:#283593,color:#fff
+
+    %% Styles — Ingress Controllers & Proxies
+    style ING_PUB fill:#326CE5,stroke:#1A4DB5,color:#fff
+    style ING_INT fill:#283593,stroke:#1A237E,color:#fff
+    style INT_ING fill:#3F51B5,stroke:#1A237E,color:#fff
+    style EXT_GRAF fill:#CE93D8,stroke:#6A1B9A,color:#000
+    style EXT_KB fill:#CE93D8,stroke:#6A1B9A,color:#000
+    style EXT_ARGO fill:#CE93D8,stroke:#6A1B9A,color:#000
+    style EXT_JAEGER fill:#CE93D8,stroke:#6A1B9A,color:#000
+
+    %% Styles — ArgoCD GitOps
+    style ArgoCD fill:#EF7B4D,stroke:#C04A1A,color:#fff
+    style ArgoNotif fill:#F4A261,stroke:#C04A1A,color:#000
+
+    %% Styles — App Workloads
+    style TM_ING fill:#326CE5,stroke:#1A4DB5,color:#fff
+    style FD fill:#66BB6A,stroke:#2E7D32,color:#000
+    style FS fill:#A5D6A7,stroke:#2E7D32,color:#000
+    style BD fill:#FFA726,stroke:#E65100,color:#000
+    style BS fill:#FFCC80,stroke:#E65100,color:#000
+    style PS fill:#CE93D8,stroke:#6A1B9A,color:#000
+    style CM fill:#78909C,stroke:#37474F,color:#fff
+    style RDS fill:#EF5350,stroke:#B71C1C,color:#fff
+
+    %% Styles — EKS Add-ons & Storage
+    style VPC_CNI fill:#00897B,stroke:#004D40,color:#fff
+    style COREDNS fill:#00897B,stroke:#004D40,color:#fff
+    style KPROXY fill:#00897B,stroke:#004D40,color:#fff
+    style EBS_CSI fill:#00897B,stroke:#004D40,color:#fff
+    style SC_GP3 fill:#8E24AA,stroke:#4A148C,color:#fff
+
+    %% Styles — Observability, Monitoring & Tracing
+    style PROM fill:#E6522C,stroke:#B13A1E,color:#fff
+    style GRAF fill:#F5A623,stroke:#C07D10,color:#000
+    style ALERT fill:#D63B25,stroke:#9B2A1C,color:#fff
+    style NE fill:#E6522C,stroke:#B13A1E,color:#fff
+    style KSM fill:#E6522C,stroke:#B13A1E,color:#fff
+    style JAEGER_Q fill:#60D0E4,stroke:#2BA0B5,color:#000
+    style JAEGER_C fill:#4DB6C8,stroke:#2BA0B5,color:#000
+    style JAEGER_A fill:#80DEEA,stroke:#2BA0B5,color:#000
+
+    %% Styles — CloudWatch & Bedrock
+    style CWAgent fill:#FF9900,stroke:#232F3E,color:#fff
+    style CWLogs fill:#FFE0B2,stroke:#E65100,color:#000
+    style CWDash fill:#FF9900,stroke:#232F3E,color:#000
+    style Bedrock fill:#FF9900,stroke:#232F3E,color:#000
+
+    %% Styles — Centralized Logging & AI SRE
+    style ES fill:#005571,stroke:#003A4D,color:#fff
+    style FB fill:#49BDA5,stroke:#2D8F7B,color:#000
+    style KB fill:#E8478B,stroke:#C12D6B,color:#fff
+    style K8SGPT fill:#9C27B0,stroke:#6A1B9A,color:#fff
+
+    %% Styles — Full-Stack Autoscaling (KEDA + HPA + Karpenter)
+    style KEDA_CTRL fill:#FF6F00,stroke:#E65100,color:#fff
+    style METRICS_SRV fill:#FFA726,stroke:#E65100,color:#000
+    style KP_CTRL fill:#1565C0,stroke:#0D47A1,color:#fff
+    style KP_NP fill:#42A5F5,stroke:#1565C0,color:#000
+    style KP_INTR fill:#90CAF9,stroke:#1565C0,color:#000
+    style FE_HPA fill:#A5D6A7,stroke:#2E7D32,color:#000
+    style FE_PDB fill:#C8E6C9,stroke:#2E7D32,color:#000
+    style BE_SO fill:#FFCC80,stroke:#E65100,color:#000
+    style BE_PDB fill:#FFE0B2,stroke:#E65100,color:#000
 ```
 
 ### Detailed Domain Workflows
