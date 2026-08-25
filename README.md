@@ -18,7 +18,7 @@ graph TB
             INT_NLB["🔒 Internal AWS NLB\n(nginx-internal · VPC-only CIDR)\n→ Internal Observability & GitOps"]
         end
 
-        subgraph "Amazon EKS Cluster (v1.30 · Dual Managed Node Groups)"
+        subgraph "Amazon EKS Cluster (v1.30 · System On-Demand + Karpenter Dynamic Spot)"
 
             subgraph "ingress-nginx Namespace (Dual Ingress Controllers)"
                 ING_PUB["nginx-public Controller\n(ingressClassName: nginx-public)"]
@@ -39,12 +39,16 @@ graph TB
                 direction TB
                 TM_ING["ingress.yaml\n(nginx-public: / and /api→rewrite→/)"]
                 subgraph "Frontend Tier"
-                    FD["Frontend Pods\n(nginx:1.25-alpine)\n3 replicas · port 80"]
+                    FD["Frontend Pods\n(nginx:1.25-alpine)\n3–10 replicas · port 80"]
                     FS["frontend-svc\n(ClusterIP :80)"]
+                    FE_HPA["📈 frontend-hpa\n(HPA: CPU 75% · Mem 80%)\nmin:3 → max:10 pods"]
+                    FE_PDB["🛡️ frontend-pdb\n(minAvailable: 2)"]
                 end
                 subgraph "Backend Tier"
-                    BD["Backend Pods\n(postgrest/postgrest:v12.2.3)\n2 replicas · port 3000"]
+                    BD["Backend Pods\n(postgrest/postgrest:v12.2.3)\n2–15 replicas · port 3000"]
                     BS["backend-svc\n(ClusterIP :3000)"]
+                    BE_SO["⚡ backend-scaledobject\n(KEDA: Prometheus req/min + CPU 70%)\nmin:2 → max:15 pods"]
+                    BE_PDB["🛡️ backend-pdb\n(minAvailable: 1)"]
                 end
                 subgraph "Database Access"
                     PS["postgres-svc\n(ExternalName :5432 → RDS)"]
@@ -89,6 +93,17 @@ graph TB
 
             subgraph "k8sgpt Namespace (Helm: k8sgpt-operator)"
                 K8SGPT["🤖 K8sGPT Operator\n(AI-Powered SRE Engine)\nIRSA Role: Claude 3 Haiku"]
+            end
+
+            subgraph "keda Namespace (Helm: kedacore/keda)"
+                KEDA_CTRL["⚡ KEDA Controller\n(2 replicas · event-driven pod scaler)\nPrometheus ScaledObject triggers"]
+                METRICS_SRV["📊 Kubernetes Metrics Server\n(CPU/Memory telemetry for HPA)"]
+            end
+
+            subgraph "Karpenter Dynamic Node Pool (AWS EC2 Fleet)"
+                KP_CTRL["🚀 Karpenter Controller\n(kube-system · 2 replicas · IRSA)\nProvisions EC2 in < 45 seconds"]
+                KP_NP["NodePool: app-nodepool\n(Spot→On-Demand fallback)\nt3/c6i/m6i · 100 vCPU limit"]
+                KP_INTR["📬 SQS Interruption Queue\n+ 3× EventBridge Rules\n(2-min Spot warning handler)"]
             end
         end
 
@@ -177,6 +192,20 @@ graph TB
     Bedrock -->|"AI Root Cause & Fix Commands"| K8SGPT
     K8SGPT -->|"AI Incident Diagnosis (Webhook)"| Teams
 
+    %% Full-Stack Autoscaling (KEDA + HPA + Karpenter)
+    PROM -.->|"PromQL req/min metric"| KEDA_CTRL
+    KEDA_CTRL -.->|"Drives HPA replica count"| BE_SO
+    METRICS_SRV -.->|"CPU/Mem telemetry"| FE_HPA
+    METRICS_SRV -.->|"CPU/Mem telemetry"| BE_SO
+    BE_SO -.->|"Scales 2→15 pods"| BD
+    FE_HPA -.->|"Scales 3→10 pods"| FD
+    BE_PDB -.->|"Guards during drain"| BD
+    FE_PDB -.->|"Guards during drain"| FD
+    BD -.->|"Pending pods trigger"| KP_CTRL
+    FD -.->|"Pending pods trigger"| KP_CTRL
+    KP_CTRL -->|"EC2 Fleet API (< 45s)"| KP_NP
+    KP_INTR -.->|"Spot 2-min warning"| KP_CTRL
+
     %% Styles — External Actors
     style User fill:#4FC3F7,stroke:#0277BD,color:#000
     style DevOps fill:#7B68EE,stroke:#4B0082,color:#fff
@@ -238,6 +267,17 @@ graph TB
     style FB fill:#49BDA5,stroke:#2D8F7B,color:#000
     style KB fill:#E8478B,stroke:#C12D6B,color:#fff
     style K8SGPT fill:#9C27B0,stroke:#6A1B9A,color:#fff
+
+    %% Styles — Full-Stack Autoscaling (KEDA + HPA + Karpenter)
+    style KEDA_CTRL fill:#FF6F00,stroke:#E65100,color:#fff
+    style METRICS_SRV fill:#FFA726,stroke:#E65100,color:#000
+    style KP_CTRL fill:#1565C0,stroke:#0D47A1,color:#fff
+    style KP_NP fill:#42A5F5,stroke:#1565C0,color:#000
+    style KP_INTR fill:#90CAF9,stroke:#1565C0,color:#000
+    style FE_HPA fill:#A5D6A7,stroke:#2E7D32,color:#000
+    style FE_PDB fill:#C8E6C9,stroke:#2E7D32,color:#000
+    style BE_SO fill:#FFCC80,stroke:#E65100,color:#000
+    style BE_PDB fill:#FFE0B2,stroke:#E65100,color:#000
 ```
 
 ### Architecture Highlights
@@ -264,14 +304,19 @@ graph TB
    - Autonomous Kubernetes failure detection across pods, deployments, services, ingress, PVCs, and nodes.
    - Leverages **AWS Bedrock (Anthropic Claude 3 Haiku)** via **IAM Roles for Service Accounts (IRSA)** for passwordless, zero-secret authentication, delivering plain-English root causes and remediation `kubectl` commands directly to Microsoft Teams.
 7. **Dual Managed Node Groups (Workload Isolation & Spot Cost Optimization):**
-   - **`system_nodes`** (`ON_DEMAND`, 2× `t3.medium`): High-reliability node group hosting Ingress controllers, ArgoCD, Prometheus, Grafana, Alertmanager, Elasticsearch, Kibana, Jaeger, and K8sGPT Operator.
-   - **`app_nodes`** (`SPOT`, 2× `t3.small`): Cost-optimized node group hosting `taskmanager` application workloads (Frontend and Backend) pinned via `nodeSelector: { nodegroup: app }`, saving ~70% on compute costs.
+   - **`system_nodes`** (`ON_DEMAND`, 2× `t3.medium`): High-reliability node group hosting Ingress controllers, ArgoCD, Prometheus, Grafana, Alertmanager, Elasticsearch, Kibana, Jaeger, K8sGPT Operator, KEDA Controller, and the Karpenter controller itself.
+   - **`app_nodes` → Karpenter `NodePool`**: Cost-optimized dynamic compute pool for `taskmanager` application workloads. Karpenter provisions right-sized Spot instances (with On-Demand fallback) from families `t3`, `t3a`, `c6i`, `m6i` within 45 seconds when pods become `Pending`; auto-consolidates and terminates idle nodes.
+8. **Full-Stack Autoscaling Engine (KEDA + HPA + Karpenter):**
+   - **Pod-Level — KEDA (Event-Driven)**: `ScaledObject` on the backend drives HPA scaling from **2 → 15 replicas** based on dual triggers: Prometheus PostgREST request rate (`> 50 req/min per pod`) and CPU utilization (`> 70%`).
+   - **Pod-Level — HPA (Resource-Based)**: Standard Kubernetes HPA scales frontend from **3 → 10 replicas** on CPU (`> 75%`) and Memory (`> 80%`); powered by Kubernetes Metrics Server.
+   - **Node-Level — Karpenter**: Automatically provisions EC2 Spot/On-Demand nodes from AWS EC2 Fleet API in **< 45 seconds** when scaling pods are `Pending`. Handles Spot interruption warnings (2-minute SQS/EventBridge signal) with graceful node draining. Consolidates underutilized nodes after 30 seconds idle.
+   - **Resilience — PodDisruptionBudgets (PDBs)**: Guarantee `minAvailable: 2` for frontend and `minAvailable: 1` for backend during any Karpenter node consolidation or EC2 reclaim, ensuring zero user-facing downtime.
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| **Container Orchestration** | AWS EKS 1.30 (Dual Node Groups: `system_nodes` [ON_DEMAND `t3.medium`] + `app_nodes` [SPOT `t3.small`]) |
+| **Container Orchestration** | AWS EKS 1.30 (`system_nodes` [ON_DEMAND `t3.medium`] + Karpenter Dynamic NodePool [Spot `t3/c6i/m6i`]) |
 | **EKS Managed Add-ons** | `vpc-cni`, `coredns`, `kube-proxy`, `aws-ebs-csi-driver` |
 | **Persistent Storage** | Kubernetes `gp3` StorageClass (`WaitForFirstConsumer`, EBS CSI provisioner) |
 | **Frontend** | Nginx serving static HTML/CSS/JS |
@@ -280,8 +325,12 @@ graph TB
 | **GitOps** | ArgoCD v2.12 — Helm-managed, fully automated via `terraform apply` |
 | **CI/CD** | GitHub Actions — Terraform plan/apply pipeline with OIDC authentication |
 | **Ingress** | Dual Nginx Ingress Controllers — `nginx-public` (internet) + `nginx-internal` (VPC-only) |
+| **Event-Driven Pod Autoscaling** | KEDA v2.15 — Prometheus request-rate + CPU triggers on backend (`ScaledObject`, min:2 → max:15) |
+| **Resource-Based Pod Autoscaling** | Kubernetes HPA v2 — CPU/Memory triggers on frontend (min:3 → max:10) via Metrics Server |
+| **Node Autoscaling** | Karpenter v1.0.8 — just-in-time EC2 Spot/On-Demand provisioning (< 45s), Spot interruption via SQS + EventBridge, node consolidation |
+| **Resilience** | PodDisruptionBudgets — `minAvailable: 2` (frontend) + `minAvailable: 1` (backend) |
 | **Metrics & Monitoring** | Prometheus 2.53 + Grafana 11.1 via `kube-prometheus-stack` (Helm-managed) |
-| **Distributed Tracing** | Jaeger 3.0 via `jaegertracing/jaeger` — Collector (`Deployment`), Query UI (`Deployment`), Agent (`DaemonSet`); traces stored in Elasticsearch |
+| **Distributed Tracing** | Jaeger 3.0 via `jaegertracing/jaeger` — Collector, Query UI, Agent (`DaemonSet`); traces stored in Elasticsearch |
 | **Alerting** | Alertmanager (MS Teams webhook routing) + AWS CloudWatch Alarms |
 | **Observability (AWS)** | AWS CloudWatch (Dashboard + Container Insights + Metric Alarms) |
 | **Centralized Logging** | EFK Stack — Elasticsearch 8.15, Fluent Bit 3.1, Kibana 8.15 (Helm-managed via Terraform) |
@@ -299,17 +348,21 @@ graph TB
 │   ├── frontend-configmap.yaml       # Frontend HTML/CSS/JS (served via Nginx)
 │   ├── frontend-deployment.yaml
 │   ├── frontend-service.yaml         # type: ClusterIP — traffic enters via nginx Ingress only
+│   ├── frontend-hpa.yaml             # HPA: CPU 75% + Memory 80% → scales frontend 3→10 pods
 │   ├── backend-deployment.yaml       # PostgREST deployment
 │   ├── backend-service.yaml          # type: ClusterIP
+│   ├── backend-scaledobject.yaml     # KEDA ScaledObject: Prometheus req/min + CPU → scales backend 2→15 pods
+│   ├── pdb.yaml                      # PodDisruptionBudgets (frontend minAvail:2 + backend minAvail:1)
 │   ├── postgres-service.yaml         # type: ExternalName → AWS RDS endpoint
+│   ├── karpenter-nodepool.yaml       # Karpenter EC2NodeClass + NodePool (Spot→On-Demand, auto-consolidation)
 │   ├── ingress.yaml                  # Public Ingress (nginx-public: / → frontend, /api → backend)
 │   └── ingress-internal.yaml         # Internal Ingress (nginx-internal: /grafana, /kibana, /argocd, /jaeger)
 │
 └── terraform/                        # Infrastructure as Code
     ├── provider.tf                   # AWS + Kubernetes + Helm + Random provider config
-    ├── variables.tf                  # All configurable inputs (EFK, Monitoring, ArgoCD, Tracing vars)
+    ├── variables.tf                  # All configurable inputs (EFK, Monitoring, ArgoCD, Tracing, Karpenter, KEDA vars)
     ├── vpc.tf                        # VPC, public/private subnets, NAT Gateway
-    ├── eks.tf                        # EKS cluster + Dual Node Groups (system + app) + EBS CSI + IRSA
+    ├── eks.tf                        # EKS cluster + system_nodes (ON_DEMAND) + EBS CSI IRSA
     ├── rds.tf                        # RDS PostgreSQL instance + subnet/security groups
     ├── cloudwatch.tf                 # CloudWatch Log Groups, Dashboard, Metric Alarms
     ├── ingress.tf                    # Dual Nginx Ingress Controllers (nginx-public + nginx-internal)
@@ -318,6 +371,8 @@ graph TB
     ├── tracing.tf                    # Jaeger distributed tracing stack (Helm: jaegertracing/jaeger)
     ├── argocd.tf                     # ArgoCD GitOps controller (Helm: argo/argo-cd)
     ├── k8sgpt.tf                     # K8sGPT Operator (AI-powered SRE via AWS Bedrock + IRSA)
+    ├── karpenter.tf                  # Karpenter: IRSA + Node IAM Role + SQS queue + EventBridge + Helm
+    ├── keda.tf                       # KEDA Controller + Kubernetes Metrics Server (Helm)
     └── outputs.tf                    # Key outputs (endpoints, commands, passwords)
 ├── .github/
 │   └── workflows/

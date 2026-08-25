@@ -1,0 +1,48 @@
+﻿# ─── PodDisruptionBudgets (PDB) ────────────────────────────────────────────────
+#
+# PDBs guarantee that at least N pods of each tier remain Available during:
+#   - Karpenter node consolidation (terminating underutilized EC2 instances)
+#   - Spot instance reclamation (2-minute warning drain)
+#   - kubectl drain / rolling node upgrades
+#
+# Without PDBs, Karpenter could theoretically drain ALL pods of a tier at once
+# during a consolidation event, causing a brief service outage.
+# ──────────────────────────────────────────────────────────────────────────────
+
+---
+# ─── PDB: Frontend (nginx) ────────────────────────────────────────────────────
+# Guarantees at least 2 frontend pods remain running during any disruption.
+# With min 3 replicas, this allows 1 pod to be drained at a time.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend-pdb
+  namespace: taskmanager
+  labels:
+    app: taskmanager
+    tier: frontend
+spec:
+  minAvailable: 2  # At least 2 frontend pods must remain Up at all times
+  selector:
+    matchLabels:
+      app: taskmanager
+      tier: frontend
+
+---
+# ─── PDB: Backend (PostgREST) ─────────────────────────────────────────────────
+# Guarantees at least 1 backend pod remains running during any disruption.
+# With min 2 replicas, this allows 1 pod to be drained at a time gracefully.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: backend-pdb
+  namespace: taskmanager
+  labels:
+    app: taskmanager
+    tier: backend
+spec:
+  minAvailable: 1  # At least 1 backend pod must remain Up at all times
+  selector:
+    matchLabels:
+      app: taskmanager
+      tier: backend

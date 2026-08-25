@@ -191,3 +191,37 @@ output "k8sgpt_bedrock_model" {
   description = "AWS Bedrock model currently configured for K8sGPT incident analysis."
   value       = var.k8sgpt_enabled ? var.k8sgpt_bedrock_model : "K8sGPT is disabled (k8sgpt_enabled = false)"
 }
+
+# ─── Karpenter Node Autoscaler ────────────────────────────────────────────────
+
+output "karpenter_status_command" {
+  description = "Check Karpenter controller pod health and active NodePool / EC2NodeClass resources."
+  value       = var.karpenter_enabled ? "kubectl get pods -n kube-system -l app.kubernetes.io/name=karpenter && kubectl get nodepools,ec2nodeclasses" : "Karpenter is disabled (karpenter_enabled = false)"
+}
+
+output "karpenter_nodes_command" {
+  description = "List all nodes provisioned by Karpenter with their instance type and AZ."
+  value       = var.karpenter_enabled ? "kubectl get nodes -l karpenter.sh/nodepool=app-nodepool -o wide" : "Karpenter is disabled (karpenter_enabled = false)"
+}
+
+output "karpenter_interruption_queue" {
+  description = "SQS queue ARN used for Spot interruption and EC2 state-change event handling."
+  value       = var.karpenter_enabled ? aws_sqs_queue.karpenter_interruption[0].arn : "Karpenter is disabled (karpenter_enabled = false)"
+}
+
+# ─── KEDA Event-Driven Autoscaler ─────────────────────────────────────────────
+
+output "keda_status_command" {
+  description = "Check KEDA controller pod health and all active ScaledObjects in the cluster."
+  value       = var.keda_enabled ? "kubectl get pods -n keda && kubectl get scaledobjects -A" : "KEDA is disabled (keda_enabled = false)"
+}
+
+output "keda_hpa_command" {
+  description = "View all HPA resources managed by KEDA for the taskmanager namespace."
+  value       = var.keda_enabled ? "kubectl get hpa -n taskmanager" : "KEDA is disabled (keda_enabled = false)"
+}
+
+output "autoscaling_observe_command" {
+  description = "Watch pod scaling events in real time across the taskmanager namespace."
+  value       = "kubectl get pods -n taskmanager -w"
+}

@@ -1,0 +1,70 @@
+﻿# ─── HPA: Frontend (Nginx) Horizontal Pod Autoscaler ──────────────────────────
+#
+# The Frontend (Nginx) serves static HTML/JS files. It is CPU-bound during
+# TLS termination and connection handling at high concurrency.
+# This HPA scales frontend pods from 3 to 10 based on CPU and Memory utilization.
+#
+# Requires: kubernetes metrics-server running in kube-system (deployed via keda.tf)
+# ──────────────────────────────────────────────────────────────────────────────
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: frontend-hpa
+  namespace: taskmanager
+  labels:
+    app: taskmanager
+    tier: frontend
+spec:
+  # ── Target Deployment ───────────────────────────────────────────────────────
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: frontend
+
+  # ── Replica Bounds ──────────────────────────────────────────────────────────
+  minReplicas: 3   # 3 replicas across 2 AZs for baseline HA
+  maxReplicas: 10  # Scale up to 10 frontend pods during traffic spikes
+
+  # ── Scaling Metrics ─────────────────────────────────────────────────────────
+  metrics:
+    # CPU Utilization: Scale when average CPU across frontend pods exceeds 75%.
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75
+
+    # Memory Utilization: Scale when average RAM exceeds 80%.
+    # Prevents OOM kills during large file serving or memory pressure.
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  # ── Scaling Behavior ────────────────────────────────────────────────────────
+  behavior:
+    # Scale UP: Fast response to traffic spikes.
+    # Adds up to 4 pods every 30 seconds when under load.
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 4
+          periodSeconds: 30
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+      selectPolicy: Max
+
+    # Scale DOWN: Conservative cooldown to avoid premature scale-down.
+    # Removes at most 2 pods every 5 minutes (avoids oscillation).
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 300

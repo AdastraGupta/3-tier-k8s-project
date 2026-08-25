@@ -87,6 +87,16 @@ on:
         required: false
         type: boolean
         default: true
+      karpenter_enabled:
+        description: "Deploy Karpenter just-in-time EC2 node autoscaler?"
+        required: false
+        type: boolean
+        default: true
+      keda_enabled:
+        description: "Deploy KEDA event-driven pod autoscaler + Kubernetes Metrics Server?"
+        required: false
+        type: boolean
+        default: true
 
 # ── Concurrency: prevent parallel runs on the same branch ──────────────────
 concurrency:
@@ -220,6 +230,8 @@ jobs:
             -var="argocd_enabled=${{ github.event.inputs.argocd_enabled || 'true' }}" \
             -var="tracing_enabled=${{ github.event.inputs.tracing_enabled || 'true' }}" \
             -var="k8sgpt_enabled=${{ github.event.inputs.k8sgpt_enabled || 'true' }}" \
+            -var="karpenter_enabled=${{ github.event.inputs.karpenter_enabled || 'true' }}" \
+            -var="keda_enabled=${{ github.event.inputs.keda_enabled || 'true' }}" \
             -detailed-exitcode \
             -no-color \
             -out=tfplan \

@@ -225,3 +225,19 @@ variable "k8sgpt_anonymize" {
   default     = true
 }
 
+# ─── Karpenter: Node Autoscaler ───────────────────────────────────────────────
+
+variable "karpenter_enabled" {
+  description = "Enable Karpenter just-in-time EC2 node autoscaler. Provisions right-sized Spot/On-Demand nodes in < 45s when pods are Pending."
+  type        = bool
+  default     = true
+}
+
+# ─── KEDA: Event-Driven Pod Autoscaler ───────────────────────────────────────
+
+variable "keda_enabled" {
+  description = "Enable KEDA event-driven pod autoscaling. Also installs Kubernetes Metrics Server required for HPA CPU/Memory triggers."
+  type        = bool
+  default     = true
+}
+

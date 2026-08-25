@@ -1,0 +1,63 @@
+﻿# ─── KEDA ScaledObject: Backend (PostgREST) Event-Driven Autoscaling ──────────
+#
+# ScaledObject instructs KEDA to drive the HPA for the 'backend' Deployment.
+# It configures TWO parallel scaling triggers:
+#
+#   Trigger 1 (Prometheus — Request Rate):
+#     Scales out when PostgREST receives more than 50 HTTP requests/sec per pod.
+#
+#   Trigger 2 (CPU Utilization):
+#     Scales out when average CPU across backend pods exceeds 70%.
+#
+# When EITHER trigger fires, KEDA increases the HPA targetReplicas accordingly.
+# ──────────────────────────────────────────────────────────────────────────────
+
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: backend-scaledobject
+  namespace: taskmanager
+  labels:
+    app: taskmanager
+    tier: backend
+spec:
+  # ── Target: The Deployment to scale ────────────────────────────────────────
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+
+  # ── Replica Bounds ──────────────────────────────────────────────────────────
+  minReplicaCount: 2   # Always keep at least 2 replicas for HA (never scale to 0)
+  maxReplicaCount: 15  # Hard ceiling: 15 backend pods maximum
+
+  # ── Cooldown Windows ───────────────────────────────────────────────────────
+  # pollingInterval: How often KEDA checks metrics (seconds).
+  # cooldownPeriod:  Minimum idle time before scaling DOWN (avoids thrashing).
+  pollingInterval: 15
+  cooldownPeriod:  120
+
+  # ── Scaling Triggers ────────────────────────────────────────────────────────
+  triggers:
+
+    # ── Trigger 1: Prometheus Request Rate ──────────────────────────────────
+    # Scales out when total PostgREST request rate exceeds
+    # (threshold * currentReplicas) requests per minute.
+    # At threshold=50, 2 pods handle 100 req/min; at 200 req/min KEDA scales to 4.
+    - type: prometheus
+      metadata:
+        # Prometheus endpoint inside the cluster (kube-prometheus-stack).
+        serverAddress: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+        # PromQL: total HTTP requests per minute across ALL backend pods.
+        query: "sum(rate(postgrest_requests_total{namespace=\"taskmanager\"}[1m])) * 60"
+        # Scale target: 50 requests/min per replica.
+        threshold: "50"
+        metricName: postgrest_requests_per_minute
+
+    # ── Trigger 2: CPU Utilization ────────────────────────────────────────────
+    # Standard Kubernetes HPA CPU trigger via Metrics Server.
+    # Scales out when average CPU across all backend pods exceeds 70%.
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "70"
