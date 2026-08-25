@@ -4,92 +4,185 @@ A production-grade, cloud-native **3-tier task manager** application deployed on
 
 ## Architecture
 
+The system is structured into **4 decoupled tiers** with clear boundaries between public user traffic, internal administrative access, core cluster infrastructure, and cloud-managed services.
+
+### High-Level System Architecture
+
 ```mermaid
 graph TB
-    subgraph Clients ["🌐 External Clients & Actors"]
-        User["🌐 Public Users<br/>(Browser Traffic)"]
-        DevOps["🔐 DevOps / SRE<br/>(VPN / Port-Forward)"]
-        GitHub["📦 GitHub Repository<br/>(GitOps Trigger)"]
+    %% External Actors
+    User["🌐 Public Users / Browser"]
+    DevOps["🔐 DevOps / SRE / VPN"]
+    GitHub["📦 GitHub Repository\n(AdastraGupta/3-tier-k8s-project)"]
+    Teams["📣 Microsoft Teams\n(Alerts & AI Triage)"]
+
+    %% Tier 1: Ingress Layer
+    subgraph TIER1["1. Dual Ingress & Load Balancing Layer"]
+        PUB_NLB["☁️ Public AWS NLB\n(nginx-public)"]
+        INT_NLB["🔒 Internal AWS NLB\n(nginx-internal · Private VPC)"]
     end
 
-    subgraph Layer1 ["1. Dual Ingress & GitOps Entrypoint Layer"]
-        PUB_NLB["☁️ Public AWS NLB<br/>(Internet-Facing · :80)"]
-        INT_NLB["🔒 Internal AWS NLB<br/>(Private VPC Only)"]
-        ArgoCD["🔄 ArgoCD GitOps<br/>(Auto-Syncs k8s/ manifests)"]
+    %% Tier 2: EKS Cluster Compute
+    subgraph TIER2["2. Amazon EKS Cluster (v1.30 · Workload-Isolated Compute)"]
+        subgraph SYS_POOL["Fixed System Node Group (On-Demand · t3.medium)"]
+            ING_CTRL["Dual Nginx Controllers\n(Public & Internal)"]
+            ARGO_CTRL["🔄 ArgoCD GitOps\n+ Notifications Controller"]
+            OBS_STACK["📊 Observability Stack\nPrometheus · Grafana · EFK · Jaeger"]
+            AUTO_CTRL["⚡ Autoscaling & AI Controllers\nKEDA · Metrics Server · Karpenter · K8sGPT"]
+        end
+
+        subgraph APP_POOL["Dynamic Application Pool (Karpenter Spot · t3/c6i/m6i)"]
+            FE_TIER["🖥️ Frontend Tier\n3–10 Pods (Nginx UI)\nProtected by HPA + PDB"]
+            BE_TIER["⚙️ Backend Tier\n2–15 Pods (PostgREST API)\nProtected by KEDA + PDB"]
+        end
     end
 
-    subgraph Layer2 ["2. Application Tier (taskmanager Namespace)"]
-        ING_PUB["nginx-public Ingress<br/>(/ ➔ Frontend · /api ➔ Backend)"]
-        FE["🖥️ Frontend Pods (3–10)<br/>nginx:1.25 · HTML/CSS/JS UI"]
-        BE["⚙️ Backend Pods (2–15)<br/>PostgREST v12.2.3 REST API"]
+    %% Tier 3: Storage & Data
+    subgraph TIER3["3. Data & Storage Tier"]
+        RDS[("🗄️ AWS RDS PostgreSQL 15\n(taskdb · Port 5432 · Private Subnets)")]
+        EBS_GP3[("💾 AWS EBS gp3 Volumes\n(Prometheus TSDB · Elasticsearch Data)")]
     end
 
-    subgraph Layer3 ["3. Full-Stack Autoscaling Engine"]
-        KEDA["⚡ KEDA + Metrics Server<br/>(Prometheus Req/Min + CPU Triggers)"]
-        Karpenter["🚀 Karpenter Just-in-Time Provisioner<br/>(Dynamic Spot EC2 Fleet &lt; 45s)"]
+    %% Tier 4: Cloud Intelligence & Operations
+    subgraph TIER4["4. Cloud Intelligence & Operations Tier"]
+        BEDROCK["🧠 AWS Bedrock (Claude 3 Haiku)\n(Zero-Secret AI Triage via IRSA)"]
+        CLOUDWATCH["📈 AWS CloudWatch\n(Container Insights · EMF · Alarms)"]
     end
 
-    subgraph Layer4 ["4. Managed Database Layer"]
-        RDS[("🗄️ AWS RDS PostgreSQL 15<br/>Single/Multi-AZ · taskdb :5432")]
-    end
+    %% Main Inter-Tier Connections
+    User -->|"HTTP :80"| PUB_NLB
+    PUB_NLB --> ING_CTRL
+    ING_CTRL -->|"Routes /"| FE_TIER
+    ING_CTRL -->|"Routes /api"| BE_TIER
 
-    subgraph Layer5 ["5. Observability, Tracing & AI SRE"]
-        INT_ING["nginx-internal Ingress<br/>(/grafana · /kibana · /jaeger · /argocd)"]
-        PromGraf["📊 Prometheus & Grafana<br/>(Metrics TSDB & Dashboards)"]
-        EFK["📝 EFK Logging Stack<br/>(Fluent Bit ➔ Elasticsearch ➔ Kibana)"]
-        Jaeger["🔭 Jaeger Distributed Tracing<br/>(Collector ➔ ES Traces ➔ UI)"]
-        K8sGPT["🤖 K8sGPT + AWS Bedrock<br/>(Claude 3 Haiku AI Diagnostics)"]
-    end
+    DevOps -->|"VPN / SSM"| INT_NLB
+    INT_NLB --> ING_CTRL
+    ING_CTRL -->|"Routes /grafana, /kibana, /argocd, /jaeger"| OBS_STACK
+    ING_CTRL -->|"Routes /argocd"| ARGO_CTRL
 
-    %% 🌐 Public Application Traffic Flow
-    User -->|HTTP Requests| PUB_NLB
-    PUB_NLB --> ING_PUB
-    ING_PUB -->|Path: /| FE
-    ING_PUB -->|Path: /api| BE
-    BE -->|SQL Queries :5432| RDS
+    GitHub -->|"GitOps auto-sync manifests"| ARGO_CTRL
+    ARGO_CTRL -->|"Syncs state"| FE_TIER
+    ARGO_CTRL -->|"Syncs state"| BE_TIER
 
-    %% 🔄 Continuous GitOps Delivery
-    GitHub -->|Git Push to main| ArgoCD
-    ArgoCD -->|Reconciles Manifests| Layer2
+    BE_TIER -->|"PGRST_DB_URI :5432"| RDS
+    OBS_STACK -.->|"Dynamic Volume Provisioning"| EBS_GP3
 
-    %% ⚡ Autoscaling Data Paths
-    BE -.->|Request Rate Metric| KEDA
-    FE -.->|CPU/Mem Usage| KEDA
-    KEDA -.->|Scales Pods 2➔15| Layer2
-    Layer2 -.->|Pending Pods| Karpenter
-    Karpenter -.->|Provisions EC2 Nodes| Layer2
+    AUTO_CTRL -.->|"Auto-provisions EC2 in <45s"| APP_POOL
+    AUTO_CTRL -.->|"Sends incident diagnosis"| BEDROCK
+    BEDROCK -.->|"AI Root Cause & Fix"| AUTO_CTRL
+    AUTO_CTRL -->|"Alert Cards"| Teams
+    ARGO_CTRL -->|"GitOps Alerts"| Teams
 
-    %% 🔒 Internal Observability & Admin Flow
-    DevOps -->|Private Access| INT_NLB
-    INT_NLB --> INT_ING
-    INT_ING --> PromGraf
-    INT_ING --> EFK
-    INT_ING --> Jaeger
-    INT_ING --> ArgoCD
+    %% Visual Styles
+    style User fill:#4FC3F7,stroke:#0277BD,color:#000
+    style DevOps fill:#7B68EE,stroke:#4B0082,color:#fff
+    style GitHub fill:#24292E,stroke:#586069,color:#fff
+    style Teams fill:#6264A7,stroke:#464775,color:#fff
 
-    %% 📊 Telemetry & AI Diagnosis Feeds
-    Layer2 -.->|Metrics, Logs & Spans| Layer5
-    Layer5 -.->|Incident Context| K8sGPT
+    style TIER1 fill:#ECEFF1,stroke:#607D8B,color:#263238
+    style TIER2 fill:#E3F2FD,stroke:#1565C0,color:#0D47A1
+    style TIER3 fill:#EDE7F6,stroke:#512DA8,color:#311B92
+    style TIER4 fill:#FFF3E0,stroke:#E65100,color:#BF360C
 
-    %% Custom Visual Styling
-    style User fill:#E1F5FE,stroke:#0288D1,color:#01579B
-    style DevOps fill:#EDE7F6,stroke:#7E57C2,color:#4527A0
-    style GitHub fill:#ECEFF1,stroke:#607D8B,color:#263238
-    style PUB_NLB fill:#FFF3E0,stroke:#FF9800,color:#E65100
-    style INT_NLB fill:#E8EAF6,stroke:#3F51B5,color:#1A237E
-    style ArgoCD fill:#FBE9E7,stroke:#FF5722,color:#BF360C
-    style ING_PUB fill:#E3F2FD,stroke:#2196F3,color:#0D47A1
-    style FE fill:#E8F5E9,stroke:#4CAF50,color:#1B5E20
-    style BE fill:#FFF8E1,stroke:#FFC107,color:#FF6F00
-    style RDS fill:#FFEBEE,stroke:#E91E63,color:#880E4F
-    style KEDA fill:#FFF3E0,stroke:#FF6F00,color:#E65100
-    style Karpenter fill:#E1F5FE,stroke:#0288D1,color:#01579B
-    style INT_ING fill:#E8EAF6,stroke:#3F51B5,color:#1A237E
-    style PromGraf fill:#FBE9E7,stroke:#FF5722,color:#BF360C
-    style EFK fill:#E0F2F1,stroke:#009688,color:#004D40
-    style Jaeger fill:#E0F7FA,stroke:#00BCD4,color:#006064
-    style K8sGPT fill:#F3E5F5,stroke:#9C27B0,color:#4A148C
+    style PUB_NLB fill:#FF9900,stroke:#232F3E,color:#000
+    style INT_NLB fill:#5C6BC0,stroke:#283593,color:#fff
+    style SYS_POOL fill:#BBDEFB,stroke:#1976D2,color:#000
+    style APP_POOL fill:#C8E6C9,stroke:#388E3C,color:#000
+    style FE_TIER fill:#81C784,stroke:#2E7D32,color:#000
+    style BE_TIER fill:#FFB74D,stroke:#E65100,color:#000
+    style RDS fill:#EF5350,stroke:#B71C1C,color:#fff
+    style EBS_GP3 fill:#BA68C8,stroke:#6A1B9A,color:#fff
+    style BEDROCK fill:#FF9900,stroke:#232F3E,color:#000
+    style CLOUDWATCH fill:#FFE0B2,stroke:#E65100,color:#000
+    style ING_CTRL fill:#64B5F6,stroke:#1565C0,color:#000
+    style ARGO_CTRL fill:#FF8A65,stroke:#D84315,color:#000
+    style OBS_STACK fill:#E1BEE7,stroke:#7B1FA2,color:#000
+    style AUTO_CTRL fill:#FFF176,stroke:#F57F17,color:#000
 ```
+
+---
+
+### Detailed Subsystem Flows
+
+To make complex interactions easy to understand, the architecture is divided into **4 specialized workflows**:
+
+```carousel
+```mermaid
+graph LR
+    subgraph "1. Application Traffic & Data Flow"
+        User["🌐 Public User"] -->|"HTTP :80"| NLB["Public NLB"]
+        NLB -->|"nginx-public"| Ingress["Ingress Rules"]
+        Ingress -->|"Path: /"| FE["Frontend UI\n(Nginx: 3-10 pods)"]
+        Ingress -->|"Path: /api"| BE["Backend API\n(PostgREST: 2-15 pods)"]
+        BE -->|"postgres-svc:5432\n(ExternalName)"| RDS[("AWS RDS PostgreSQL 15\n(taskdb)")]
+    end
+    style User fill:#4FC3F7,stroke:#0277BD,color:#000
+    style NLB fill:#FF9900,stroke:#232F3E,color:#000
+    style Ingress fill:#326CE5,stroke:#1A4DB5,color:#fff
+    style FE fill:#81C784,stroke:#2E7D32,color:#000
+    style BE fill:#FFB74D,stroke:#E65100,color:#000
+    style RDS fill:#EF5350,stroke:#B71C1C,color:#fff
+```
+<!-- slide -->
+```mermaid
+graph LR
+    subgraph "2. Full-Stack Autoscaling Pipeline"
+        Traffic["📈 Traffic Spike"] --> Backend["Backend (PostgREST)"]
+        Backend -.->|"Metrics (/metrics)"| Prom["Prometheus TSDB"]
+        Prom -.->|"PromQL query"| KEDA["KEDA Controller"]
+        KEDA -.->|"Drives HPA 2➔15 pods"| Backend
+        Backend -.->|"Pending Pods"| Karpenter["Karpenter Controller"]
+        Karpenter -->|"EC2 Fleet API (<45s)"| AWS["AWS Spot EC2 Nodes\n(t3/c6i/m6i)"]
+        SQS["SQS Interruption Queue\n(2-min warning)"] -.->|"Graceful Drain"| Karpenter
+    end
+    style Traffic fill:#EF5350,stroke:#B71C1C,color:#fff
+    style Backend fill:#FFB74D,stroke:#E65100,color:#000
+    style Prom fill:#E6522C,stroke:#B13A1E,color:#fff
+    style KEDA fill:#FF6F00,stroke:#E65100,color:#fff
+    style Karpenter fill:#1565C0,stroke:#0D47A1,color:#fff
+    style AWS fill:#42A5F5,stroke:#1565C0,color:#000
+    style SQS fill:#90CAF9,stroke:#1565C0,color:#000
+```
+<!-- slide -->
+```mermaid
+graph LR
+    subgraph "3. Internal Tools & Secure Observability Access"
+        DevOps["🔐 DevOps / SRE (VPN)"] -->|"VPC CIDR only"| IntNLB["Internal NLB"]
+        IntNLB -->|"nginx-internal"| IntIng["Internal Ingress Rules"]
+        IntIng -->|"Path: /grafana"| Grafana["📈 Grafana 11.1\n(kube-prometheus-stack)"]
+        IntIng -->|"Path: /kibana"| Kibana["📑 Kibana 8.15\n(EFK Log Search)"]
+        IntIng -->|"Path: /jaeger"| Jaeger["🔭 Jaeger UI\n(Distributed Tracing)"]
+        IntIng -->|"Path: /argocd"| ArgoCD["🔄 ArgoCD Server\n(GitOps Management)"]
+    end
+    style DevOps fill:#7B68EE,stroke:#4B0082,color:#fff
+    style IntNLB fill:#5C6BC0,stroke:#283593,color:#fff
+    style IntIng fill:#3F51B5,stroke:#1A237E,color:#fff
+    style Grafana fill:#F5A623,stroke:#C07D10,color:#000
+    style Kibana fill:#E8478B,stroke:#C12D6B,color:#fff
+    style Jaeger fill:#60D0E4,stroke:#2BA0B5,color:#000
+    style ArgoCD fill:#EF7B4D,stroke:#C04A1A,color:#fff
+```
+<!-- slide -->
+```mermaid
+graph LR
+    subgraph "4. AI SRE Incident Triage & Triple-Layer Alerts"
+        CrashPod["💥 Pod Crash / Error"] --> K8sGPT["🤖 K8sGPT Operator"]
+        K8sGPT -->|"InvokeModel (IRSA)"| Bedrock["🧠 AWS Bedrock\n(Claude 3 Haiku)"]
+        Bedrock -->|"Root Cause + Fix Command"| K8sGPT
+        K8sGPT -->|"AI Incident Card"| Teams["📣 Microsoft Teams"]
+        Alertmanager["🚨 Alertmanager"] -->|"Prometheus Metric Alerts"| Teams
+        ArgoNotif["🔔 ArgoCD Notifications"] -->|"GitOps Sync Alerts"| Teams
+    end
+    style CrashPod fill:#EF5350,stroke:#B71C1C,color:#fff
+    style K8sGPT fill:#9C27B0,stroke:#6A1B9A,color:#fff
+    style Bedrock fill:#FF9900,stroke:#232F3E,color:#000
+    style Teams fill:#6264A7,stroke:#464775,color:#fff
+    style Alertmanager fill:#D63B25,stroke:#9B2A1C,color:#fff
+    style ArgoNotif fill:#F4A261,stroke:#C04A1A,color:#000
+```
+```
+
+---
 
 
 ### Architecture Highlights
