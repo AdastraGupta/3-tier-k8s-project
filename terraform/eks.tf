@@ -18,6 +18,11 @@ module "eks" {
   # Enable CloudWatch logging for the control plane
   cluster_enabled_log_types = ["api", "audit", "authenticator"]
 
+  # Tag the EKS node security group for Karpenter dynamic discovery
+  node_security_group_tags = {
+    "karpenter.sh/discovery" = var.cluster_name
+  }
+
   # ─── EKS Add-ons ─────────────────────────────────────────────────────────────
   # Essential AWS-managed core networking and DNS add-ons.
   cluster_addons = {
