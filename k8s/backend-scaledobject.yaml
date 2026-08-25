@@ -1,10 +1,10 @@
-﻿# ─── KEDA ScaledObject: Backend (PostgREST) Event-Driven Autoscaling ──────────
+# ─── KEDA ScaledObject: Backend (PostgREST) Event-Driven Autoscaling ──────────
 #
 # ScaledObject instructs KEDA to drive the HPA for the 'backend' Deployment.
 # It configures TWO parallel scaling triggers:
 #
 #   Trigger 1 (Prometheus — Request Rate):
-#     Scales out when PostgREST receives more than 50 HTTP requests/sec per pod.
+#     Scales out when PostgREST receives more than 50 HTTP requests/min per pod.
 #
 #   Trigger 2 (CPU Utilization):
 #     Scales out when average CPU across backend pods exceeds 70%.
