@@ -397,11 +397,15 @@ terraform apply
 ```
 
 This provisions:
-- EKS cluster (`taskmanager-cluster`) with **2 Dedicated Managed Node Groups** (`system_nodes` ON_DEMAND + `app_nodes` SPOT)
+- EKS cluster (`taskmanager-cluster`) with **On-Demand System Node Group** + **Karpenter Just-in-Time Spot NodePool**
 - AWS RDS PostgreSQL 15 (`db.t4g.micro`)
 - VPC with public/private subnets across 2 AZs
-- CloudWatch Dashboard + Metric Alarms
-- **EFK Logging Stack** via Helm (Elasticsearch, Fluent Bit, Kibana)
+- CloudWatch Dashboard + Metric Alarms + Container Insights
+- **EFK Logging Stack** via Helm (Elasticsearch 8.15, Fluent Bit 3.1, Kibana 8.15)
+- **Prometheus + Grafana + Alertmanager Monitoring Stack** via Helm
+- **Jaeger Distributed Tracing Stack** via Helm (connected to Elasticsearch backend)
+- **K8sGPT Operator** with AWS Bedrock AI incident analysis
+- **KEDA + Kubernetes Metrics Server + Karpenter** full-stack autoscaling engine
 
 ### 2. Configure kubectl
 
@@ -826,6 +830,72 @@ status:
 > [!IMPORTANT]
 > **AWS Bedrock Model Access Required (One-Time Setup):**
 > Navigate to **AWS Console → Amazon Bedrock → Model Access → Request Access** and enable **Anthropic Claude 3 Haiku** before running `terraform apply`.
+
+## Full-Stack Autoscaling (KEDA + HPA + Karpenter)
+
+The cluster implements a 3-layer, synergistic autoscaling pipeline combining **event-driven pod scaling (KEDA)**, **resource-based pod scaling (HPA)**, and **just-in-time node provisioning (Karpenter)**.
+
+### Autoscaling Lifecycle
+
+```
+                     TRAFFIC SURGE (e.g. 5,000 HTTP req/min)
+                                        │
+                                        ▼
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │ 1. POD AUTOSCALING TIER (KEDA + HPA)                                      │
+  │ • Prometheus records request rate spike on /metrics                       │
+  │ • KEDA ScaledObject evaluates: rate > 50 req/min/pod                      │
+  │ • HPA scales backend from 2 ➔ 15 replicas                                 │
+  │ • Frontend HPA scales from 3 ➔ 10 replicas on CPU/Memory                  │
+  └─────────────────────────────────────┬─────────────────────────────────────┘
+                                        │
+                                        ▼ 6 Pods in 'Pending' (Node capacity full)
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │ 2. JUST-IN-TIME NODE PROVISIONING TIER (Karpenter)                        │
+  │ • Karpenter controller analyzes Pending pod resource requests             │
+  │ • Calls AWS EC2 Fleet API directly (< 45s)                                │
+  │ • Provisions optimal Spot instance (t3.medium / c6i.large / m6i.large)   │
+  │ • Binds pending pods immediately with zero scheduling delay               │
+  └─────────────────────────────────────┬─────────────────────────────────────┘
+                                        │
+                                        ▼ Traffic Subsides (Low load / Idle)
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │ 3. CONSOLIDATION & SCALE-DOWN                                             │
+  │ • KEDA cools down and scales pods back down (15 ➔ 2)                      │
+  │ • PodDisruptionBudgets (frontend:2, backend:1) guarantee zero downtime    │
+  │ • Karpenter consolidates empty/underutilized nodes after 30s idle         │
+  │ • Terminates extra EC2 instances to cut cloud compute costs               │
+  └───────────────────────────────────────────────────────────────────────────┘
+```
+
+### Components & Configurations
+
+| Component | Target | Scaling Metric | Min / Max Bounds | Config File |
+|---|---|---|---|---|
+| **KEDA ScaledObject** | `backend` (PostgREST) | `rate(postgrest_requests_total[1m]) > 50 req/min` OR `CPU > 70%` | **2 → 15 pods** | [`k8s/backend-scaledobject.yaml`](k8s/backend-scaledobject.yaml) |
+| **Kubernetes HPA** | `frontend` (Nginx) | `CPU > 75%` OR `Memory > 80%` (via Metrics Server) | **3 → 10 pods** | [`k8s/frontend-hpa.yaml`](k8s/frontend-hpa.yaml) |
+| **PodDisruptionBudget** | `frontend` & `backend` | Guaranteed minimum available pods during drains/consolidation | `minAvailable: 2` (FE) / `minAvailable: 1` (BE) | [`k8s/pdb.yaml`](k8s/pdb.yaml) |
+| **Karpenter NodePool** | `app-nodepool` | Dynamic EC2 provisioning for `Pending` pods (Spot → On-Demand) | Max 100 vCPUs / 200Gi RAM | [`k8s/karpenter-nodepool.yaml`](k8s/karpenter-nodepool.yaml) |
+| **Karpenter Interruption** | Cluster-wide | 2-minute Spot Interruption Warnings & Rebalance Recommendations | SQS + 3× EventBridge Rules | [`terraform/karpenter.tf`](terraform/karpenter.tf) |
+
+### Operational Commands
+
+```bash
+# Check KEDA and Metrics Server pod health
+kubectl get pods -n keda
+kubectl top pods -n taskmanager
+
+# View active ScaledObjects and HPAs
+kubectl get scaledobjects -n taskmanager
+kubectl get hpa -n taskmanager
+
+# View Karpenter NodePool and dynamic EC2 nodes
+kubectl get nodepools,ec2nodeclasses
+kubectl get nodes -l karpenter.sh/nodepool=app-nodepool -o wide
+
+# Watch real-time scaling events during a load test
+kubectl get pods -n taskmanager -w
+```
 
 ## CI/CD Pipeline
 
