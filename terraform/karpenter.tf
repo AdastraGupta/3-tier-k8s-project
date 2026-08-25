@@ -87,6 +87,14 @@ resource "aws_iam_instance_profile" "karpenter_node" {
   role  = aws_iam_role.karpenter_node[0].name
 }
 
+# Grants Karpenter-launched nodes permission to join the EKS cluster (EKS Access Entries API).
+resource "aws_eks_access_entry" "karpenter_node" {
+  count         = var.karpenter_enabled ? 1 : 0
+  cluster_name  = module.eks.cluster_name
+  principal_arn = aws_iam_role.karpenter_node[0].arn
+  type          = "EC2_LINUX"
+}
+
 # ─── 3. Spot Interruption Handling (SQS + EventBridge) ────────────────────────
 # AWS gives a 2-minute warning before reclaiming a Spot instance. Karpenter
 # subscribes to these events via SQS and gracefully drains the node before
